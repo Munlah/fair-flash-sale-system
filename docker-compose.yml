@@ -1,0 +1,87 @@
+services:
+
+  redis:
+    image: redis:7
+    container_name: dffs-redis
+    ports:
+      - "6379:6379"
+
+  postgres:
+    image: postgres:16
+    container_name: dffs-postgres
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  inventory-service:
+    build:
+      context: ./services/inventory-service
+    container_name: inventory-service
+    environment:
+      REDIS_HOST: redis
+    depends_on:
+      - redis
+    ports:
+      - "8001:8000"
+
+  admission-service:
+    build:
+      context: ./services/admission-service
+    container_name: admission-service
+    environment:
+      REDIS_HOST: redis
+      INVENTORY_URL: http://inventory-service:8000
+      TRACKED_PRODUCTS: phone
+      WINDOW_MS: "3000"
+      TICK_SECONDS: "1"
+      BASE_RATE: "5"
+    depends_on:
+      - redis
+      - inventory-service
+    ports:
+      - "8004:8000"
+
+  checkout-service:
+    build:
+      context: ./services/checkout-service
+    container_name: checkout-service
+    environment:
+      DATABASE_URL: postgresql://flash:flashpass@postgres/orders
+      REDIS_HOST: redis
+    depends_on:
+      - postgres
+      - redis
+    ports:
+      - "8002:8000"
+
+  gateway-service:
+    build:
+      context: ./services/gateway-service
+    container_name: gateway-service
+    environment:
+      REDIS_HOST: redis
+      INVENTORY_URL: http://inventory-service:8000
+      CHECKOUT_URL: http://checkout-service:8000
+    depends_on:
+      - redis
+      - inventory-service
+      - checkout-service
+      - admission-service
+    ports:
+      - "8000:8000"
+
+  web-ui:
+    image: nginx:alpine
+    container_name: dffs-web-ui
+    ports:
+      - "5500:80"
+    volumes:
+      - ./frontend:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+
+volumes:
+  postgres-data:

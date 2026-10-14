@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fair Flash Sale - Live Demo</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>⚡ Fair Flash Sale System</h1>
+            <p class="subtitle">Windowed-Random Admission Controller Demo</p>
+        </header>
+
+        <div class="stat-grid">
+            <div class="stat">
+                <div class="stat-label">Available Stock</div>
+                <div class="stat-value" id="stock">--</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Queue Length</div>
+                <div class="stat-value" id="queue">--</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Total Orders</div>
+                <div class="stat-value" id="orders">--</div>
+            </div>
+        </div>
+
+        <div class="grid">
+            <div class="card">
+                <h2>🎟️ Join Waiting Room</h2>
+                <input type="text" id="userId" placeholder="Enter your user ID" value="demo-user">
+                <input type="text" id="productId" placeholder="Product ID" value="phone">
+                <button onclick="joinQueue()">Join Queue</button>
+            </div>
+
+            <div class="card">
+                <h2>⚙️ Admin Controls</h2>
+                <input type="number" id="stockAmount" placeholder="Stock quantity" value="100">
+                <button onclick="setStock()">Set Stock</button>
+                <button class="secondary" onclick="refreshStats()">Refresh Stats</button>
+                <button class="secondary danger" onclick="clearAllTokens()">Clear All Tokens</button>
+            </div>
+
+            <div class="card full-width">
+                <h2>🎫 My Tokens (<span id="tokenCount">0</span>)</h2>
+                <div id="tokenList" class="token-list">
+                    <p class="empty-message">Join the queue to see your tokens here</p>
+                </div>
+            </div>
+
+            <div class="card full-width">
+                <h2>📝 Activity Log</h2>
+                <div class="log" id="activityLog"></div>
+            </div>
+        </div>
+
+        <div class="card full-width">
+            <h2>🎯 How Windowed-Random Admission Works</h2>
+            <p class="explanation">
+                This system groups users into <strong>3-second cohorts</strong> based on when they join.
+                Within each cohort, admission order is <strong>randomized</strong> (eliminating
+                network/timing advantages). Across different cohorts, <strong>earlier groups are always
+                prioritized</strong> (respecting wait time). The admission controller releases
+                <strong>5 users per second</strong> to prevent inventory service overload.
+            </p>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
