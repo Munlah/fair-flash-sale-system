@@ -80,18 +80,29 @@ async function joinQueue() {
         );
         const data = await response.json();
 
-        tokens.push({
-            token: data.token,
-            userId,
-            productId,
-            status: 'waiting',
-            position: data.position,
-            joinedAt: new Date().toISOString()
-        });
+        // FIX: Check if this exact token already exists in our local array
+        const existingTokenIndex = tokens.findIndex(t => t.token === data.token);
+        
+        if (existingTokenIndex !== -1) {
+            // Token already exists - just update it
+            tokens[existingTokenIndex].position = data.position;
+            tokens[existingTokenIndex].status = data.status || 'waiting';
+            log(`ℹ Already in queue as ${userId} (token: ${data.token.substring(0, 8)}...)`, 'info');
+        } else {
+            // New token - add to array
+            tokens.push({
+                token: data.token,
+                userId,
+                productId,
+                status: data.status || 'waiting',
+                position: data.position,
+                joinedAt: new Date().toISOString()
+            });
+            log(`✓ Joined queue as ${userId} (position: ${data.position})`, 'success');
+        }
 
         saveTokensToStorage();
         renderTokenList();
-        log(`✓ Joined queue as ${userId} (position: ${data.position})`, 'success');
     } catch (error) {
         log(`✗ Failed to join queue: ${error.message}`, 'error');
     }
@@ -117,6 +128,16 @@ async function checkAllStatuses() {
 
         try {
             const response = await fetch(`${API_BASE}/queue/status/${tokenObj.token}`);
+            
+            // If token not found (404), remove it from local storage
+            if (response.status === 404) {
+                console.log(`Token ${tokenObj.token.substring(0, 8)} not found, removing from list`);
+                tokens = tokens.filter(t => t.token !== tokenObj.token);
+                saveTokensToStorage();
+                renderTokenList();
+                continue;
+            }
+            
             const data = await response.json();
 
             if (data.status !== tokenObj.status) {
@@ -182,51 +203,59 @@ function clearAllTokens() {
 // Render tokens in a stable order: admitted, waiting, then completed.
 function renderTokenList() {
     const listDiv = document.getElementById('tokenList');
+    
     document.getElementById('tokenCount').textContent = tokens.length;
 
     if (tokens.length === 0) {
-        listDiv.innerHTML = '<p class="empty-message">Join the queue to see your tokens here</p>';
+        listDiv.innerHTML = `
+            <p style="color: #94a3b8; text-align: center; padding: 20px;">
+                Join the queue to see your tokens here
+            </p>
+        `;
         return;
     }
 
     const sorted = [...tokens].sort((a, b) => {
-        const order = { admitted: 0, waiting: 1, completed: 2 };
-        return order[a.status] - order[b.status];
+        const order = { 'admitted': 0, 'waiting': 1, 'completed': 2 };
+        const statusA = a.status || 'waiting';
+        const statusB = b.status || 'waiting';
+        return order[statusA] - order[statusB];
     });
 
-    listDiv.innerHTML = sorted.map((tokenObj) => {
-        const statusText = tokenObj.status.toUpperCase();
+    listDiv.innerHTML = sorted.map(t => {
+        const status = t.status || 'waiting';
+        const statusText = status.toUpperCase();
         let buttons;
 
-        if (tokenObj.status === 'admitted') {
+        if (t.status === 'admitted') {
             buttons = `
                 <div class="button-group">
-                    <button class="small" onclick="purchase('${tokenObj.token}')">Complete Purchase</button>
-                    <button class="small secondary" onclick="removeToken('${tokenObj.token}')">Remove</button>
+                    <button class="small" onclick="purchase('${t.token}')">Complete Purchase</button>
+                    <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>`;
-        } else if (tokenObj.status === 'completed') {
+        } else if (t.status === 'completed') {
             buttons = `
                 <div class="button-group">
-                    <button class="small secondary" onclick="removeToken('${tokenObj.token}')">Remove</button>
+                    <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>
-                <p class="purchase-result">✓ Order ID: ${tokenObj.orderId}</p>`;
+                <p class="purchase-result">✓ Order ID: ${t.orderId}</p>`;
         } else {
             buttons = `
                 <div class="button-group">
-                    <button class="small secondary" onclick="removeToken('${tokenObj.token}')">Remove</button>
+                    <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>
-                ${tokenObj.position !== undefined
-                    ? `<p class="queue-position">Queue Position: ${tokenObj.position}</p>` : ''}`;
+                ${t.position !== undefined
+                    ? `<p class="queue-position">Queue Position: ${t.position}</p>` : ''}`;
         }
 
         return `
-            <div class="token-item ${tokenObj.status}">
+            <div class="token-item ${t.status}">
                 <div class="token-header">
-                    <span class="token-id">${tokenObj.token}</span>
-                    <span class="status ${tokenObj.status}">${statusText}</span>
+                    <span class="token-id">${t.token}</span>
+                    <span class="status ${t.status}">${statusText}</span>
                 </div>
                 <div class="token-body">
-                    <p class="token-details">User: ${tokenObj.userId} | Product: ${tokenObj.productId}</p>
+                    <p class="token-details">User: ${t.userId} | Product: ${t.productId}</p>
                     ${buttons}
                 </div>
             </div>`;

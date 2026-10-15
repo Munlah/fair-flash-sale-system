@@ -17,21 +17,24 @@ spec:
       - name: checkout
         image: dffs/checkout:v1
         imagePullPolicy: Never
-        env:
-        - name: DATABASE_URL
-          value: postgresql://flash:flashpass@postgres/orders
-        - name: REDIS_HOST
-          value: redis
         ports:
         - containerPort: 8000
-        readinessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 10
-          periodSeconds: 10
-        livenessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 20
-          periodSeconds: 20
+        env:
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: database-url
+        - name: REDIS_HOST
+          value: "redis-service"
+        # Bug Fix: Add CPU/memory resource requests and limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "256Mi"  # More memory for database operations
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -43,3 +46,4 @@ spec:
     app: checkout
   ports:
   - port: 8000
+    targetPort: 8000

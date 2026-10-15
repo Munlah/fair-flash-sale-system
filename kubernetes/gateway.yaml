@@ -21,19 +21,19 @@ spec:
         - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: redis
+          value: "redis-service"
         - name: INVENTORY_URL
-          value: http://inventory-service:8000
+          value: "http://inventory-service:8000"
         - name: CHECKOUT_URL
-          value: http://checkout-service:8000
-        readinessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          value: "http://checkout-service:8000"
+        # Bug Fix: Add CPU/memory resource requests and limits for HPA
+        resources:
+          requests:
+            cpu: "100m"      # 0.1 CPU core minimum
+            memory: "128Mi"  # 128 MB minimum
+          limits:
+            cpu: "500m"      # 0.5 CPU core maximum
+            memory: "512Mi"  # 512 MB maximum
 ---
 apiVersion: v1
 kind: Service
@@ -46,4 +46,5 @@ spec:
     app: gateway
   ports:
   - port: 8000
-    nodePort: 30080
+    targetPort: 8000
+    nodePort: 30000

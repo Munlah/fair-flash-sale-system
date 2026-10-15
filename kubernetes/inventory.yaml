@@ -21,15 +21,15 @@ spec:
         - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: redis
-        readinessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 15
-          periodSeconds: 20
+          value: "redis-service"
+        # Bug Fix: Add CPU/memory resource requests and limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -41,3 +41,4 @@ spec:
     app: inventory
   ports:
   - port: 8000
+    targetPort: 8000

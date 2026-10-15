@@ -1,21 +1,33 @@
+version: '3.8'
+
 services:
+  postgres:
+    image: postgres:16
+    container_name: dffs-postgres
+    environment:
+      POSTGRES_USER: flash_user
+      POSTGRES_PASSWORD: flash_pass
+      POSTGRES_DB: flash_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flash_user -d flash_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   redis:
     image: redis:7
     container_name: dffs-redis
     ports:
       - "6379:6379"
-
-  postgres:
-    image: postgres:16
-    container_name: dffs-postgres
-    env_file:
-      - .env
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres-data:/var/lib/postgresql/data
-      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   inventory-service:
     build:
@@ -24,9 +36,23 @@ services:
     environment:
       REDIS_HOST: redis
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     ports:
       - "8001:8000"
+
+  checkout-service:
+    build:
+      context: ./services/checkout-service
+    container_name: checkout-service
+    environment:
+      DATABASE_URL: postgresql://flash_user:flash_pass@postgres:5432/flash_db
+    depends_on:
+      postgres:
+        condition: service_healthy  # Wait for postgres to be ready
+    ports:
+      - "8002:8000"
+    restart: on-failure  # Retry if startup fails
 
   admission-service:
     build:
@@ -35,28 +61,11 @@ services:
     environment:
       REDIS_HOST: redis
       INVENTORY_URL: http://inventory-service:8000
-      TRACKED_PRODUCTS: phone
-      WINDOW_MS: "3000"
-      TICK_SECONDS: "1"
-      BASE_RATE: "5"
     depends_on:
-      - redis
-      - inventory-service
+      redis:
+        condition: service_healthy
     ports:
       - "8004:8000"
-
-  checkout-service:
-    build:
-      context: ./services/checkout-service
-    container_name: checkout-service
-    environment:
-      DATABASE_URL: postgresql://flash:flashpass@postgres/orders
-      REDIS_HOST: redis
-    depends_on:
-      - postgres
-      - redis
-    ports:
-      - "8002:8000"
 
   gateway-service:
     build:
@@ -67,21 +76,22 @@ services:
       INVENTORY_URL: http://inventory-service:8000
       CHECKOUT_URL: http://checkout-service:8000
     depends_on:
-      - redis
-      - inventory-service
-      - checkout-service
-      - admission-service
+      redis:
+        condition: service_healthy
+      inventory-service:
+        condition: service_started
+      checkout-service:
+        condition: service_started
     ports:
       - "8000:8000"
 
   web-ui:
     image: nginx:alpine
     container_name: dffs-web-ui
-    ports:
-      - "5500:80"
     volumes:
       - ./frontend:/usr/share/nginx/html:ro
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "5500:80"
 
 volumes:
-  postgres-data:
+  postgres_data:

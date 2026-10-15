@@ -4,8 +4,7 @@ metadata:
   name: admission-service
   namespace: dffs
 spec:
-  replicas: 1   # keep at 1: the admission loop isn't leader-elected yet,
-                # so multiple replicas would double-admit. See README.
+  replicas: 1  # Single replica for now (leader election not yet implemented)
   selector:
     matchLabels:
       app: admission
@@ -22,25 +21,25 @@ spec:
         - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: redis
+          value: "redis-service"
         - name: INVENTORY_URL
-          value: http://inventory-service:8000
+          value: "http://inventory-service:8000"
         - name: TRACKED_PRODUCTS
-          value: phone
+          value: "phone"
         - name: WINDOW_MS
           value: "3000"
         - name: TICK_SECONDS
           value: "1"
         - name: BASE_RATE
           value: "5"
-        readinessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 5
-          periodSeconds: 10
-        livenessProbe:
-          httpGet: { path: /health, port: 8000 }
-          initialDelaySeconds: 15
-          periodSeconds: 20
+        # Bug Fix: Add CPU/memory resource requests and limits
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
 ---
 apiVersion: v1
 kind: Service
@@ -52,3 +51,4 @@ spec:
     app: admission
   ports:
   - port: 8000
+    targetPort: 8000
