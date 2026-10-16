@@ -32,6 +32,8 @@ spec:
           value: "1"
         - name: BASE_RATE
           value: "5"
+        - name: ADMISSION_MODE
+          value: "windowed"
         # Bug Fix: Add CPU/memory resource requests and limits
         resources:
           requests:

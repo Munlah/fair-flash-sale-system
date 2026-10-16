@@ -55,3 +55,36 @@ curl -X POST http://localhost:8001/stock/phone/100
 
 # Open the demo UI
 # Visit: http://localhost:5500/
+```
+
+# Admission strategies and fairness experiments
+
+The admission controller supports four strategies, selected with
+`ADMISSION_MODE`:
+
+- `windowed` (default): deterministic random selection from closed time windows.
+- `fifo`: admits the oldest waiting tokens first.
+- `random`: randomly selects waiting tokens.
+- `none`: admits all waiting tokens without rate limiting.
+
+For Docker Compose, select a mode when starting the admission service:
+
+```powershell
+$env:ADMISSION_MODE = "fifo"
+docker compose up -d --build admission-service
+```
+
+The active mode is available at `http://localhost:8004/mode`.
+
+The latency-group load test and experiment runner are under [`locust/`](locust/)
+and [`experiments/`](experiments/). Install their dependencies and run the
+four-mode experiment with:
+
+```powershell
+pip install -r locust/requirements.txt
+pip install -r experiments/requirements.txt
+python experiments/runner.py
+```
+
+Experiment CSV files and generated graphs are written to
+`experiments/results/`, which is intentionally ignored by Git.

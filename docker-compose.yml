@@ -61,11 +61,16 @@ services:
     environment:
       REDIS_HOST: redis
       INVENTORY_URL: http://inventory-service:8000
+      WINDOW_MS: ${WINDOW_MS:-3000}
+      TICK_SECONDS: ${TICK_SECONDS:-1}
+      BASE_RATE: ${BASE_RATE:-5}
+      ADMISSION_MODE: ${ADMISSION_MODE:-windowed}
     depends_on:
       redis:
         condition: service_healthy
     ports:
       - "8004:8000"
+    restart: on-failure
 
   gateway-service:
     build:

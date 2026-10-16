@@ -21,8 +21,17 @@ WINDOW_MS = int(os.getenv("WINDOW_MS", "3000"))
 TICK_SECONDS = float(os.getenv("TICK_SECONDS", "1"))
 BASE_RATE = int(os.getenv("BASE_RATE", "5"))
 TRACKED_PRODUCTS = [p for p in os.getenv("TRACKED_PRODUCTS", "phone").split(",") if p]
+SUPPORTED_MODES = {"windowed", "fifo", "random", "none"}
+ADMISSION_MODE = os.getenv("ADMISSION_MODE", "windowed").lower()
+if ADMISSION_MODE not in SUPPORTED_MODES:
+    print(f"Unsupported ADMISSION_MODE={ADMISSION_MODE!r}; using windowed")
+    ADMISSION_MODE = "windowed"
 
-print(f"Config loaded: WINDOW_MS={WINDOW_MS}, TICK_SECONDS={TICK_SECONDS}, BASE_RATE={BASE_RATE}")
+print(
+    "Config loaded: "
+    f"ADMISSION_MODE={ADMISSION_MODE}, WINDOW_MS={WINDOW_MS}, "
+    f"TICK_SECONDS={TICK_SECONDS}, BASE_RATE={BASE_RATE}"
+)
 
 
 async def get_capacity(product_id: str) -> int:
@@ -42,7 +51,16 @@ async def get_capacity(product_id: str) -> int:
     return min(BASE_RATE, stock)
 
 
-def admit_batch(product_id: str, capacity: int) -> int:
+def update_token_status(product_id: str, token: str) -> bool:
+    """Remove a token from the queue and mark it admitted atomically."""
+    pipe = redis_client.pipeline()
+    pipe.zrem(f"queue:{product_id}", token)
+    pipe.hset(f"token:{token}", "status", "admitted")
+    removed, _ = pipe.execute()
+    return bool(removed)
+
+
+def admit_batch_windowed(product_id: str, capacity: int) -> int:
     """Admit a deterministic random selection from each closed time window."""
     if capacity <= 0:
         return 0
@@ -78,12 +96,9 @@ def admit_batch(product_id: str, capacity: int) -> int:
         for token in cohort:
             if admitted >= capacity:
                 break
-            pipe = redis_client.pipeline()
-            pipe.zrem(f"queue:{product_id}", token)
-            pipe.hset(f"token:{token}", "status", "admitted")
-            pipe.execute()
-            admitted += 1
-            print(f"✓ Admitted token {token[:8]}... from window {w_start}")
+            if update_token_status(product_id, token):
+                admitted += 1
+                print(f"✓ [WINDOWED] Admitted token {token[:8]}... from window {w_start}")
 
     if admitted > 0:
         print(f"=== Admitted {admitted} tokens for {product_id} ===")
@@ -91,8 +106,59 @@ def admit_batch(product_id: str, capacity: int) -> int:
     return admitted
 
 
+def admit_batch_fifo(product_id: str, capacity: int) -> int:
+    """Admit the oldest waiting tokens first."""
+    if capacity <= 0:
+        return 0
+
+    waiting = redis_client.zrange(f"queue:{product_id}", 0, capacity - 1)
+    admitted = sum(
+        update_token_status(product_id, token)
+        for token in waiting
+    )
+    if admitted:
+        print(f"=== [FIFO] Admitted {admitted} tokens for {product_id} ===")
+    return admitted
+
+
+def admit_batch_random(product_id: str, capacity: int) -> int:
+    """Admit a random sample of waiting tokens."""
+    if capacity <= 0:
+        return 0
+
+    waiting = list(redis_client.zrange(f"queue:{product_id}", 0, -1))
+    random.shuffle(waiting)
+    admitted = sum(
+        update_token_status(product_id, token)
+        for token in waiting[:capacity]
+    )
+    if admitted:
+        print(f"=== [RANDOM] Admitted {admitted} tokens for {product_id} ===")
+    return admitted
+
+
+def admit_batch_none(product_id: str, capacity: int) -> int:
+    """Admit every waiting token without rate limiting."""
+    waiting = redis_client.zrange(f"queue:{product_id}", 0, -1)
+    admitted = sum(
+        update_token_status(product_id, token)
+        for token in waiting
+    )
+    if admitted:
+        print(f"=== [NONE] Admitted {admitted} tokens for {product_id} ===")
+    return admitted
+
+
+ADMISSION_FUNCTIONS = {
+    "windowed": admit_batch_windowed,
+    "fifo": admit_batch_fifo,
+    "random": admit_batch_random,
+    "none": admit_batch_none,
+}
+
+
 async def admission_loop():
-    print("🚀 ADMISSION LOOP STARTED 🚀")
+    print(f"🚀 ADMISSION LOOP STARTED ({ADMISSION_MODE}) 🚀")
     iteration = 0
     
     while True:
@@ -105,8 +171,12 @@ async def admission_loop():
                 
                 if queue_size > 0:
                     print(f"Queue for {product_id}: {queue_size} waiting")
-                    capacity = await get_capacity(product_id)
-                    admit_batch(product_id, capacity)
+                    capacity = (
+                        queue_size
+                        if ADMISSION_MODE == "none"
+                        else await get_capacity(product_id)
+                    )
+                    ADMISSION_FUNCTIONS[ADMISSION_MODE](product_id, capacity)
                     
         except Exception as e:
             print(f"❌ Error in admission loop: {e}")
@@ -123,7 +193,7 @@ admission_task = None
 async def lifespan(app: FastAPI):
     global admission_task
     print("=" * 50)
-    print("STARTING ADMISSION CONTROLLER")
+    print(f"STARTING ADMISSION CONTROLLER (MODE: {ADMISSION_MODE})")
     print("=" * 50)
     
     try:
@@ -159,13 +229,30 @@ def health():
     """Report whether the controller can reach Redis."""
     try:
         redis_client.ping()
-        return {"status": "healthy", "redis": "connected"}
+        return {
+            "status": "healthy",
+            "redis": "connected",
+            "mode": ADMISSION_MODE,
+        }
     except redis.RedisError:
-        return {"status": "unhealthy", "redis": "disconnected"}
+        return {
+            "status": "unhealthy",
+            "redis": "disconnected",
+            "mode": ADMISSION_MODE,
+        }
 
 
 @app.get("/queue/{product_id}/length")
 def queue_length(product_id: str):
     """Return the number of users still waiting for a product."""
     count = redis_client.zcard(f"queue:{product_id}")
-    return {"product_id": product_id, "waiting": count}
+    return {"product_id": product_id, "waiting": count, "mode": ADMISSION_MODE}
+
+
+@app.get("/mode")
+def get_mode():
+    """Return the active admission strategy."""
+    return {
+        "mode": ADMISSION_MODE,
+        "available_modes": sorted(SUPPORTED_MODES),
+    }

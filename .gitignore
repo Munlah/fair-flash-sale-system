@@ -45,6 +45,9 @@ curl
 # *.jpg
 # *.jpeg
 
+# Experiment output
+experiments/results/
+
 # Environment variables (IMPORTANT: decide if you want to commit .env)
 # Uncomment the line below if .env contains real secrets
 # .env
