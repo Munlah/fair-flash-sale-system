@@ -6,6 +6,7 @@ Gateway Service - Entry point for all user requests
 import os
 import uuid
 import time
+import logging
 import httpx
 import redis
 from fastapi import FastAPI, HTTPException
@@ -20,6 +21,7 @@ REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = 6379
 INVENTORY_URL = os.getenv("INVENTORY_URL", "http://localhost:8001")
 CHECKOUT_URL = os.getenv("CHECKOUT_URL", "http://localhost:8002")
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gateway Service", version="1.0.0")
 
@@ -75,41 +77,92 @@ async def health():
 @app.post("/queue/join", response_model=QueueJoinResponse)
 async def join_queue(user_id: str, product_id: str = "phone"):
     """
-    Add user to queue with spam prevention
+    Add user to queue with spam prevention using an atomic SET NX.
     """
     user_product_key = f"active_token:{user_id}:{product_id}"
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.get(f"{INVENTORY_URL}/stock/{product_id}")
+            if response.status_code == 200:
+                stock_data = response.json()
+                if stock_data.get("stock", 0) <= 0:
+                    raise HTTPException(status_code=410, detail="Product is sold out")
+            else:
+                logger.warning(
+                    "Stock check for %s returned HTTP %s; allowing queue join",
+                    product_id,
+                    response.status_code
+                )
+    except HTTPException:
+        raise
+    except (httpx.RequestError, ValueError) as exc:
+        logger.warning(
+            "Could not check stock for %s; allowing queue join: %s",
+            product_id,
+            exc
+        )
     
-    # Check for existing token
-    existing_token = await redis_async(redis_client.get, user_product_key)
-    if existing_token:
-        token_data = await redis_async(redis_client.hgetall, f"token:{existing_token}")
-        if token_data and token_data.get("status") != "completed":
-            queue_key = f"queue:{product_id}"
-            position = await redis_async(redis_client.zrank, queue_key, existing_token)
+    token = str(uuid.uuid4())
+    token_claimed = await redis_async(
+        redis_client.set,
+        user_product_key,
+        token,
+        ex=3600,
+        nx=True
+    )
+
+    if not token_claimed:
+        existing_token = await redis_async(redis_client.get, user_product_key)
+        if existing_token:
+            token_data = await redis_async(redis_client.hgetall, f"token:{existing_token}")
+            if token_data and token_data.get("status") != "completed":
+                queue_key = f"queue:{product_id}"
+                actual_status = token_data.get("status", "waiting")
+                position = None
+                if actual_status == "waiting":
+                    position = await redis_async(redis_client.zrank, queue_key, existing_token)
+                return QueueJoinResponse(
+                    token=existing_token,
+                    status=actual_status,
+                    position=position if position is not None else 0
+                )
+
+        await redis_async(redis_client.delete, user_product_key)
+        token_claimed = await redis_async(
+            redis_client.set,
+            user_product_key,
+            token,
+            ex=3600,
+            nx=True
+        )
+        if not token_claimed:
+            existing_token = await redis_async(redis_client.get, user_product_key)
+            if not existing_token:
+                raise HTTPException(status_code=409, detail="Unable to create queue token")
+            token_data = await redis_async(redis_client.hgetall, f"token:{existing_token}")
+            actual_status = token_data.get("status", "waiting")
+            position = None
+            if actual_status == "waiting":
+                position = await redis_async(
+                    redis_client.zrank,
+                    f"queue:{product_id}",
+                    existing_token
+                )
             return QueueJoinResponse(
                 token=existing_token,
-                status="waiting",
+                status=actual_status,
                 position=position if position is not None else 0
             )
-    
-    # Create new token
-    token = str(uuid.uuid4())
+
     arrival_ms = int(time.time() * 1000)
     queue_key = f"queue:{product_id}"
     
-    # Add to queue - FIX: Use mapping parameter
-    # Add to queue - FIX: Use mapping parameter
-    result = await redis_async(
+    await redis_async(
         redis_client.zadd,
         queue_key,
         mapping={token: arrival_ms}
     )
-    print(f"✓ ZADD result: {result}, token={token[:8]}, queue={queue_key}, score={arrival_ms}")
-
-    # Verify it was added
-    queue_size = await redis_async(redis_client.zcard, queue_key)
-    print(f"✓ Queue size after add: {queue_size}")
-    print(f"DEBUG: Added token {token[:8]} to queue, result={result}")
     
     # Store token metadata
     token_data = {
@@ -120,12 +173,8 @@ async def join_queue(user_id: str, product_id: str = "phone"):
     }
     await redis_async(redis_client.hset, f"token:{token}", mapping=token_data)
     
-    # Store active token (1 hour expiry)
-    await redis_async(redis_client.setex, user_product_key, 3600, token)
-    
     # Get position
     position = await redis_async(redis_client.zrank, queue_key, token)
-    print(f"DEBUG: Token {token[:8]} position in queue: {position}")
     
     return QueueJoinResponse(
         token=token,
@@ -159,6 +208,8 @@ async def purchase(token: str):
     Complete purchase with bug fixes:
     1. Check for existing order before reserving
     2. Atomic status transition
+    3. Detect sold-out properly
+    4. Release reservation on checkout failure
     """
     token_data = await redis_async(redis_client.hgetall, f"token:{token}")
     
@@ -213,26 +264,46 @@ async def purchase(token: str):
             if response.status_code == 200:
                 await redis_async(redis_client.hset, f"token:{token}", "status", "completed")
                 return PurchaseResponse(success=True, order=response.json())
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code != 404:
-            await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
-            return PurchaseResponse(success=False, reason="Error checking existing order")
-    except Exception as e:
+            if response.status_code != 404:
+                await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+                return PurchaseResponse(success=False, reason="Error checking existing order")
+    except (httpx.RequestError, ValueError) as e:
         await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
-        return PurchaseResponse(success=False, reason=str(e))
+        return PurchaseResponse(success=False, reason=f"Error checking existing order: {e}")
     
     # Reserve stock
+    reservation_id = None
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(f"{INVENTORY_URL}/reserve/{product_id}")
-            response.raise_for_status()
-            reserve_data = response.json()
-            reservation_id = reserve_data.get("reservation_id")
-    except:
+            if response.status_code == 200:
+                reserve_data = response.json()
+                if not reserve_data.get("success", False):
+                    await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+                    return PurchaseResponse(
+                        success=False,
+                        reason=reserve_data.get("reason", "Reservation failed")
+                    )
+                reservation_id = reserve_data.get("reservation_id")
+                if not reservation_id:
+                    await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+                    return PurchaseResponse(success=False, reason="Invalid reservation response")
+            else:
+                await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+                try:
+                    error_detail = response.json().get("detail", "Reservation failed")
+                except ValueError:
+                    error_detail = f"Reservation failed (HTTP {response.status_code})"
+                return PurchaseResponse(success=False, reason=error_detail)
+    except httpx.TimeoutException:
         await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
-        return PurchaseResponse(success=False, reason="Product sold out")
+        return PurchaseResponse(success=False, reason="Reservation timeout")
+    except (httpx.RequestError, ValueError) as exc:
+        await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+        return PurchaseResponse(success=False, reason=f"Reservation error: {exc}")
     
     # Create order
+    order_created = False
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(
@@ -246,9 +317,24 @@ async def purchase(token: str):
             )
             response.raise_for_status()
             order_data = response.json()
-    except:
-        await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
+            order_created = True
+    except (httpx.HTTPError, ValueError):
         return PurchaseResponse(success=False, reason="Order creation failed")
+    finally:
+        if reservation_id is not None and not order_created:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    release_response = await client.post(
+                        f"{INVENTORY_URL}/release/{reservation_id}"
+                    )
+                    release_response.raise_for_status()
+            except httpx.HTTPError:
+                logger.warning(
+                    "Failed to release reservation %s after checkout failure",
+                    reservation_id,
+                    exc_info=True
+                )
+            await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
     
     # Success
     await redis_async(redis_client.hset, f"token:{token}", "status", "completed")

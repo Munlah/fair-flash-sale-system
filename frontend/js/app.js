@@ -6,6 +6,13 @@ const INVENTORY_BASE = 'http://localhost:8001';
 let tokens = [];
 let statusCheckInterval = null;
 
+function isValidToken(token) {
+    return typeof token === 'string'
+        && token.length > 0
+        && token !== 'undefined'
+        && token !== 'null';
+}
+
 // Start the dashboard refreshers when the page is ready.
 window.onload = () => {
     loadTokensFromStorage();
@@ -16,9 +23,25 @@ window.onload = () => {
 
 function loadTokensFromStorage() {
     const stored = localStorage.getItem('flashSaleTokens');
-    if (stored) {
-        tokens = JSON.parse(stored);
+    if (!stored) {
+        return;
+    }
+
+    try {
+        const parsed = JSON.parse(stored);
+        const parsedTokens = Array.isArray(parsed) ? parsed : [];
+        tokens = parsedTokens.filter(
+            token => token && isValidToken(token.token)
+        );
+        if (tokens.length !== parsedTokens.length || !Array.isArray(parsed)) {
+            console.log(`Cleaned ${parsedTokens.length - tokens.length} invalid tokens from storage`);
+            saveTokensToStorage();
+        }
         renderTokenList();
+    } catch (error) {
+        console.error('Failed to load tokens from storage:', error);
+        tokens = [];
+        localStorage.removeItem('flashSaleTokens');
     }
 }
 
@@ -67,10 +90,16 @@ async function refreshStats() {
 async function joinQueue() {
     const userId = document.getElementById('userId').value;
     const productId = document.getElementById('productId').value;
+    const joinButton = document.querySelector('button[onclick="joinQueue()"]');
 
     if (!userId) {
         alert('Please enter a user ID');
         return;
+    }
+
+    if (joinButton) {
+        joinButton.disabled = true;
+        joinButton.textContent = 'Joining...';
     }
 
     try {
@@ -78,33 +107,61 @@ async function joinQueue() {
             `${API_BASE}/queue/join?user_id=${encodeURIComponent(userId)}&product_id=${encodeURIComponent(productId)}`,
             { method: 'POST' }
         );
+
+        if (response.status === 410) {
+            const error = await response.json();
+            const message = error.detail || 'Product is sold out';
+            log(`✗ ${message}`, 'error');
+            return;
+        }
+
+        if (!response.ok) {
+            try {
+                const error = await response.json();
+                log(`✗ Failed to join queue: ${error.detail || 'Unknown error'}`, 'error');
+            } catch {
+                log(`✗ Failed to join queue: HTTP ${response.status}`, 'error');
+            }
+            return;
+        }
+
         const data = await response.json();
 
-        // FIX: Check if this exact token already exists in our local array
-        const existingTokenIndex = tokens.findIndex(t => t.token === data.token);
+        if (!data || !isValidToken(data.token)) {
+            console.error('Invalid response data:', data);
+            log('✗ Invalid response from server', 'error');
+            return;
+        }
+
+        const existingTokenIndex = tokens.findIndex(t => t && t.token === data.token);
         
         if (existingTokenIndex !== -1) {
-            // Token already exists - just update it
             tokens[existingTokenIndex].position = data.position;
             tokens[existingTokenIndex].status = data.status || 'waiting';
-            log(`ℹ Already in queue as ${userId} (token: ${data.token.substring(0, 8)}...)`, 'info');
+            log(`ℹ Already in queue as ${userId}`, 'info');
         } else {
-            // New token - add to array
             tokens.push({
                 token: data.token,
                 userId,
                 productId,
                 status: data.status || 'waiting',
-                position: data.position,
+                position: data.position !== undefined ? data.position : null,
                 joinedAt: new Date().toISOString()
             });
-            log(`✓ Joined queue as ${userId} (position: ${data.position})`, 'success');
+            const positionText = data.position !== undefined ? `position: ${data.position}` : '';
+            log(`✓ Joined queue as ${userId} ${positionText}`, 'success');
         }
 
+        tokens = tokens.filter(token => token && isValidToken(token.token));
         saveTokensToStorage();
         renderTokenList();
     } catch (error) {
         log(`✗ Failed to join queue: ${error.message}`, 'error');
+    } finally {
+        if (joinButton) {
+            joinButton.disabled = false;
+            joinButton.textContent = 'Join Queue';
+        }
     }
 }
 
@@ -122,6 +179,11 @@ async function checkAllStatuses() {
     }
 
     for (const tokenObj of tokens) {
+        if (!tokenObj || !isValidToken(tokenObj.token)) {
+            console.warn('Skipping invalid token:', tokenObj);
+            continue;
+        }
+
         if (tokenObj.status === 'completed') {
             continue;
         }
@@ -135,6 +197,10 @@ async function checkAllStatuses() {
                 tokens = tokens.filter(t => t.token !== tokenObj.token);
                 saveTokensToStorage();
                 renderTokenList();
+                continue;
+            }
+
+            if (!response.ok) {
                 continue;
             }
             
@@ -159,6 +225,11 @@ async function checkAllStatuses() {
 
 // Ask the gateway to reserve stock and create an order for an admitted token.
 async function purchase(token) {
+    if (!isValidToken(token)) {
+        log('✗ Invalid token', 'error');
+        return;
+    }
+
     try {
         const response = await fetch(`${API_BASE}/purchase?token=${encodeURIComponent(token)}`, {
             method: 'POST'
@@ -185,6 +256,14 @@ async function purchase(token) {
 }
 
 function removeToken(token) {
+    if (!isValidToken(token)) {
+        console.error('Invalid token passed to removeToken:', token);
+        tokens = tokens.filter(item => item && item.token !== token);
+        saveTokensToStorage();
+        renderTokenList();
+        return;
+    }
+
     tokens = tokens.filter((item) => item.token !== token);
     saveTokensToStorage();
     renderTokenList();
@@ -203,7 +282,8 @@ function clearAllTokens() {
 // Render tokens in a stable order: admitted, waiting, then completed.
 function renderTokenList() {
     const listDiv = document.getElementById('tokenList');
-    
+
+    tokens = tokens.filter(token => token && isValidToken(token.token));
     document.getElementById('tokenCount').textContent = tokens.length;
 
     if (tokens.length === 0) {
@@ -223,6 +303,13 @@ function renderTokenList() {
     });
 
     listDiv.innerHTML = sorted.map(t => {
+        if (!t || !isValidToken(t.token)) {
+            return '';
+        }
+        if (!t || !t.token) {
+            return '';
+        }
+
         const status = t.status || 'waiting';
         const statusText = status.toUpperCase();
         let buttons;
@@ -244,7 +331,7 @@ function renderTokenList() {
                 <div class="button-group">
                     <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>
-                ${t.position !== undefined
+                ${t.position !== undefined && t.position !== null
                     ? `<p class="queue-position">Queue Position: ${t.position}</p>` : ''}`;
         }
 
@@ -259,7 +346,7 @@ function renderTokenList() {
                     ${buttons}
                 </div>
             </div>`;
-    }).join('');
+    }).filter(html => html !== '').join('');
 }
 
 // Set the demo product stock through the inventory service.
