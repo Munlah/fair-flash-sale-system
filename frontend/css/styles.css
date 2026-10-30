@@ -41,9 +41,44 @@ h1 {
     font-size: 1.1rem;
 }
 
+.system-banner {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 8px 14px;
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    border-radius: 999px;
+    color: #6ee7b7;
+    background: rgba(16, 185, 129, 0.08);
+    font-size: 0.9rem;
+}
+
+.system-banner.degraded {
+    border-color: rgba(245, 158, 11, 0.6);
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.08);
+}
+
+.pulse,
+.state-dot {
+    display: inline-block;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15);
+}
+
+.degraded .pulse,
+.service-card.recovering .state-dot {
+    background: #f59e0b;
+    box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
+}
+
 .stat-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 16px;
     margin-bottom: 20px;
 }
@@ -89,6 +124,93 @@ h1 {
     font-size: 1.3rem;
     margin-bottom: 16px;
     color: #38bdf8;
+}
+
+.section-heading {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+}
+
+.section-heading h2 {
+    margin-bottom: 0;
+}
+
+.last-updated {
+    color: #64748b;
+    font-size: 0.8rem;
+}
+
+.service-health {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+}
+
+.service-card {
+    padding: 14px;
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    border-radius: 8px;
+    background: rgba(16, 185, 129, 0.06);
+}
+
+.service-card.recovering {
+    border-color: rgba(245, 158, 11, 0.6);
+    background: rgba(245, 158, 11, 0.06);
+}
+
+.service-name {
+    margin-bottom: 8px;
+    color: #e2e8f0;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.service-state {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: #6ee7b7;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+}
+
+.recovering .service-state {
+    color: #fbbf24;
+}
+
+.demo-steps {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.demo-step {
+    display: grid;
+    grid-template-columns: 30px 1fr;
+    column-gap: 10px;
+    align-items: center;
+    padding: 12px;
+    border-radius: 8px;
+    background: #0f172a;
+}
+
+.demo-step span {
+    grid-row: span 2;
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    color: #0f172a;
+    background: #38bdf8;
+    font-weight: 700;
+}
+
+.demo-step small {
+    color: #94a3b8;
 }
 
 input,
@@ -287,7 +409,9 @@ button.small {
 
 @media (max-width: 768px) {
     .grid,
-    .stat-grid {
+    .stat-grid,
+    .service-health,
+    .demo-steps {
         grid-template-columns: 1fr;
     }
 }

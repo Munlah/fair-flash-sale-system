@@ -1,3 +1,10 @@
+"""Admission controller for the flash-sale waiting room.
+
+The service reads waiting tokens from Redis and moves a limited number to
+``admitted`` on every tick. The windowed mode shuffles users inside a closed
+time window while keeping older windows ahead of newer ones.
+"""
+
 import asyncio
 import os
 import random
@@ -8,6 +15,7 @@ import httpx
 import redis
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from leader_election import run_with_leader_election
 
 # The controller and gateway share this Redis instance.
 redis_client = redis.Redis(
@@ -157,33 +165,27 @@ ADMISSION_FUNCTIONS = {
 }
 
 
-async def admission_loop():
-    print(f"🚀 ADMISSION LOOP STARTED ({ADMISSION_MODE}) 🚀")
-    iteration = 0
-    
-    while True:
-        try:
-            iteration += 1
-            print(f"\n--- Tick {iteration} ---")
-            
-            for product_id in TRACKED_PRODUCTS:
-                queue_size = redis_client.zcard(f"queue:{product_id}")
-                
-                if queue_size > 0:
-                    print(f"Queue for {product_id}: {queue_size} waiting")
-                    capacity = (
-                        queue_size
-                        if ADMISSION_MODE == "none"
-                        else await get_capacity(product_id)
-                    )
-                    ADMISSION_FUNCTIONS[ADMISSION_MODE](product_id, capacity)
-                    
-        except Exception as e:
-            print(f"❌ Error in admission loop: {e}")
-            import traceback
-            traceback.print_exc()
+async def admission_loop_iteration():
+    """Single iteration of the admission loop (called by leader election)"""
+    for product_id in TRACKED_PRODUCTS:
+        queue_size = redis_client.zcard(f"queue:{product_id}")
         
-        await asyncio.sleep(TICK_SECONDS)
+        if queue_size > 0:
+            print(f"Queue for {product_id}: {queue_size} waiting")
+            capacity = (
+                queue_size
+                if ADMISSION_MODE == "none"
+                else await get_capacity(product_id)
+            )
+            ADMISSION_FUNCTIONS[ADMISSION_MODE](product_id, capacity)
+
+
+async def admission_loop():
+    """Main admission loop with leader election"""
+    print(f"🚀 ADMISSION LOOP STARTED ({ADMISSION_MODE}) WITH LEADER ELECTION 🚀")
+    
+    # Run admission loop with leader election
+    await run_with_leader_election(admission_loop_iteration)
 
 
 admission_task = None
@@ -194,6 +196,7 @@ async def lifespan(app: FastAPI):
     global admission_task
     print("=" * 50)
     print(f"STARTING ADMISSION CONTROLLER (MODE: {ADMISSION_MODE})")
+    print("LEADER ELECTION: ENABLED")
     print("=" * 50)
     
     try:
@@ -203,7 +206,7 @@ async def lifespan(app: FastAPI):
         print(f"✗ Redis connection failed: {e}")
     
     admission_task = asyncio.create_task(admission_loop())
-    print("✓ Background task started")
+    print("✓ Background task started with leader election")
     
     yield
     
@@ -233,6 +236,7 @@ def health():
             "status": "healthy",
             "redis": "connected",
             "mode": ADMISSION_MODE,
+            "leader_election": "enabled",  # ← ADD THIS
         }
     except redis.RedisError:
         return {

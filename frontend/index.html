@@ -10,7 +10,11 @@
     <div class="container">
         <header>
             <h1>⚡ Fair Flash Sale System</h1>
-            <p class="subtitle">Windowed-Random Admission Controller Demo</p>
+            <p class="subtitle">Windowed-random admission, resilient checkout, and live recovery</p>
+            <div class="system-banner" id="systemBanner">
+                <span class="pulse"></span>
+                <span id="systemBannerText">Connecting to the system...</span>
+            </div>
         </header>
 
         <div class="stat-grid">
@@ -26,9 +30,21 @@
                 <div class="stat-label">Total Orders</div>
                 <div class="stat-value" id="orders">--</div>
             </div>
+            <div class="stat">
+                <div class="stat-label">Payment Success Rate</div>
+                <div class="stat-value" id="paymentRate">--</div>
+            </div>
         </div>
 
         <div class="grid">
+            <div class="card full-width">
+                <div class="section-heading">
+                    <h2>🛰️ Live Service Health</h2>
+                    <span class="last-updated" id="lastUpdated">Waiting for first update</span>
+                </div>
+                <div id="serviceHealth" class="service-health"></div>
+            </div>
+
             <div class="card">
                 <h2>🎟️ Join Waiting Room</h2>
                 <input type="text" id="userId" placeholder="Enter your user ID" value="demo-user">
@@ -54,6 +70,20 @@
             <div class="card full-width">
                 <h2>📝 Activity Log</h2>
                 <div class="log" id="activityLog"></div>
+            </div>
+
+            <div class="card full-width">
+                <h2>🎬 Demo Story</h2>
+                <div class="demo-steps">
+                    <div class="demo-step"><span>1</span><strong>Join</strong><small>Enter the waiting room</small></div>
+                    <div class="demo-step"><span>2</span><strong>Admit</strong><small>Fair cohort selection</small></div>
+                    <div class="demo-step"><span>3</span><strong>Purchase</strong><small>Reserve, charge, and persist</small></div>
+                    <div class="demo-step"><span>4</span><strong>Recover</strong><small>Pods restart without losing queue state</small></div>
+                </div>
+                <p class="explanation">
+                    Keep this panel visible while recording. The health cards and timeline update every two seconds,
+                    so a restarted service changes to <strong>RECOVERING</strong> and then returns to <strong>HEALTHY</strong>.
+                </p>
             </div>
         </div>
 

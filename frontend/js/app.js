@@ -1,10 +1,12 @@
 // The browser talks to the gateway for queue and purchase actions.
-const API_BASE = 'http://localhost:8000';
-const INVENTORY_BASE = 'http://localhost:8001';
+const API_BASES = ['http://localhost:8000', 'http://localhost:8005'];
+let API_BASE = API_BASES[0];
 
 // Keep tokens in browser storage so a page refresh does not lose the user's queue view.
 let tokens = [];
 let statusCheckInterval = null;
+let previousSnapshot = null;
+let dashboardErrorLogged = false;
 
 function isValidToken(token) {
     return typeof token === 'string'
@@ -71,19 +73,94 @@ function log(message, type = 'info') {
 // Load current stock and queue size for the dashboard.
 async function refreshStats() {
     try {
-        const stockRes = await fetch(`${INVENTORY_BASE}/stock/phone`);
-        const stockData = await stockRes.json();
-        document.getElementById('stock').textContent = stockData.stock;
+        let response;
+        let lastError;
+        for (const candidate of API_BASES) {
+            try {
+                response = await fetch(`${candidate}/dashboard/snapshot?product_id=phone`);
+                if (response.ok) {
+                    API_BASE = candidate;
+                    break;
+                }
+                lastError = new Error(`dashboard returned HTTP ${response.status}`);
+            } catch (error) {
+                lastError = error;
+            }
+        }
 
-        const queueRes = await fetch('http://localhost:8004/queue/phone/length');
-        const queueData = await queueRes.json();
-        document.getElementById('queue').textContent = queueData.waiting;
+        if (!response || !response.ok) {
+            throw lastError || new Error('No gateway endpoint available');
+        }
 
-        const orderCount = 100 - stockData.stock;
-        document.getElementById('orders').textContent = orderCount > 0 ? orderCount : 0;
+        const snapshot = await response.json();
+        const healthy = snapshot.services.filter(service => service.available).length;
+        const total = snapshot.services.length;
+
+        document.getElementById('stock').textContent = snapshot.stock?.stock ?? '--';
+        document.getElementById('queue').textContent = snapshot.queue?.waiting ?? '--';
+        document.getElementById('orders').textContent = snapshot.orders?.total_orders ?? '--';
+
+        const paymentRate = snapshot.payments?.success_rate;
+        document.getElementById('paymentRate').textContent = paymentRate === undefined
+            ? '--'
+            : `${Math.round(paymentRate * 100)}%`;
+
+        const banner = document.getElementById('systemBannerText');
+        banner.textContent = healthy === total
+            ? 'All services healthy'
+            : `${healthy}/${total} services healthy — recovery in progress`;
+        document.getElementById('systemBanner').classList.toggle('degraded', healthy !== total);
+        document.getElementById('lastUpdated').textContent =
+            `Updated ${new Date().toLocaleTimeString()}`;
+        renderServiceHealth(snapshot.services);
+        logSnapshotChanges(snapshot);
+        dashboardErrorLogged = false;
     } catch (error) {
-        console.error('Stats refresh failed:', error);
+        document.getElementById('systemBannerText').textContent =
+            'Dashboard connection lost — checking for recovery';
+        document.getElementById('systemBanner').classList.add('degraded');
+        if (!dashboardErrorLogged) {
+            log(`Dashboard update failed: ${error.message}`, 'error');
+            dashboardErrorLogged = true;
+        }
     }
+}
+
+function logSnapshotChanges(snapshot) {
+    if (!previousSnapshot) {
+        log('Live dashboard connected', 'success');
+    } else {
+        const previousServices = Object.fromEntries(
+            previousSnapshot.services.map(service => [service.service, service.available])
+        );
+        snapshot.services.forEach(service => {
+            if (previousServices[service.service] !== service.available) {
+                log(
+                    `${service.service} is ${service.available ? 'healthy again' : 'recovering'}`,
+                    service.available ? 'success' : 'error'
+                );
+            }
+        });
+
+        const previousOrders = previousSnapshot.orders?.total_orders;
+        const currentOrders = snapshot.orders?.total_orders;
+        if (currentOrders !== undefined && currentOrders !== previousOrders) {
+            log(`Order database updated: ${currentOrders} total orders`, 'info');
+        }
+    }
+    previousSnapshot = snapshot;
+}
+
+function renderServiceHealth(services) {
+    const container = document.getElementById('serviceHealth');
+    container.innerHTML = services.map(service => {
+        const state = service.available ? 'healthy' : 'recovering';
+        return `
+            <div class="service-card ${state}">
+                <div class="service-name">${service.service}</div>
+                <div class="service-state"><span class="state-dot"></span>${state}</div>
+            </div>`;
+    }).join('');
 }
 
 // Submit a new customer to the gateway waiting room.
@@ -359,7 +436,7 @@ async function setStock() {
     }
 
     try {
-        const response = await fetch(`${INVENTORY_BASE}/stock/phone/${amount}`, { method: 'POST' });
+        const response = await fetch(`${API_BASE}/stock/phone/${amount}`, { method: 'POST' });
         const data = await response.json();
         log(`✓ Stock set to ${data.stock}`, 'success');
         refreshStats();

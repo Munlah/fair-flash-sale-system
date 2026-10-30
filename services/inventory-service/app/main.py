@@ -9,6 +9,7 @@
 # to the pool via /release (called by the Gateway on a failed checkout).
 
 import os
+import time
 import uuid
 
 import redis
@@ -46,7 +47,8 @@ if tonumber(stock) <= 0 then
 end
 
 redis.call('DECR', KEYS[1])
-redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+redis.call('HSET', KEYS[2], 'product_id', ARGV[3], 'created_at', ARGV[4])
+redis.call('EXPIRE', KEYS[2], ARGV[2])
 
 return {'OK', ARGV[1]}
 """
@@ -75,11 +77,20 @@ def reserve(product_id: str):
 
     result = reserve_inventory(
         keys=[f"stock:{product_id}", f"reservation:{reservation_id}"],
-        args=[reservation_id, RESERVATION_TIMEOUT],
+        args=[reservation_id, RESERVATION_TIMEOUT, product_id, str(time.time())],
     )
 
     status = result[0]
     if status == "OK":
+        redis_client.setex(
+            f"reservation-product:{reservation_id}",
+            RESERVATION_TIMEOUT + 3600,
+            product_id,
+        )
+        redis_client.zadd(
+            "reservation_expirations",
+            {reservation_id: time.time() + RESERVATION_TIMEOUT},
+        )
         return {"success": True, "reservation_id": reservation_id}
     return {"success": False, "reason": result[1]}
 
@@ -87,13 +98,18 @@ def reserve(product_id: str):
 @app.post("/release/{reservation_id}")
 def release(reservation_id: str):
     reservation_key = f"reservation:{reservation_id}"
-    product = redis_client.get(reservation_key)
+    reservation = redis_client.hgetall(reservation_key)
+    product = reservation.get("product_id") or redis_client.get(
+        f"reservation-product:{reservation_id}"
+    )
 
-    if product is None:
+    if not product:
         return {"success": False, "reason": "reservation_not_found"}
 
     redis_client.incr(f"stock:{product}")
     redis_client.delete(reservation_key)
+    redis_client.delete(f"reservation-product:{reservation_id}")
+    redis_client.zrem("reservation_expirations", reservation_id)
     return {"success": True, "released_product": product}
 
 

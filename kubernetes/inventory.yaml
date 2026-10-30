@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: inventory-service
+  name: inventory
   namespace: dffs
 spec:
   replicas: 2
@@ -15,13 +15,13 @@ spec:
     spec:
       containers:
       - name: inventory
-        image: dffs/inventory:v1
+        image: dffs-inventory:latest
         imagePullPolicy: Never
         ports:
         - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: "redis-service"
+          value: "redis"
         # Bug Fix: Add CPU/memory resource requests and limits
         resources:
           requests:
@@ -34,7 +34,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: inventory-service
+  name: inventory
   namespace: dffs
 spec:
   selector:

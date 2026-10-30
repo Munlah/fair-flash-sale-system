@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: admission-service
+  name: admission
   namespace: dffs
 spec:
-  replicas: 1  # Single replica for now (leader election not yet implemented)
+  replicas: 2
   selector:
     matchLabels:
       app: admission
@@ -15,15 +15,15 @@ spec:
     spec:
       containers:
       - name: admission
-        image: dffs/admission:v1
+        image: dffs-admission:latest  # ← FIXED
         imagePullPolicy: Never
-        ports:
-        - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: "redis-service"
+          value: "redis"
         - name: INVENTORY_URL
-          value: "http://inventory-service:8000"
+          value: "http://inventory:8000"
+        - name: GATEWAY_URL
+          value: "http://gateway:8000"
         - name: TRACKED_PRODUCTS
           value: "phone"
         - name: WINDOW_MS
@@ -34,7 +34,6 @@ spec:
           value: "5"
         - name: ADMISSION_MODE
           value: "windowed"
-        # Bug Fix: Add CPU/memory resource requests and limits
         resources:
           requests:
             cpu: "100m"
@@ -42,11 +41,19 @@ spec:
           limits:
             cpu: "500m"
             memory: "512Mi"
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import redis; r = redis.Redis(host='redis'); r.ping()"
+          initialDelaySeconds: 10
+          periodSeconds: 30
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: admission-service
+  name: admission  # ← Changed to match other services (optional, not actually used)
   namespace: dffs
 spec:
   selector:

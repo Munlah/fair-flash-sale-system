@@ -26,10 +26,13 @@ from pydantic import BaseModel
 # Configuration - Read from environment variables
 # ==========================================================================
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://flash_user:flash_pass@postgres:5432/flash_db"
-)
+# Build DATABASE_URL from individual env vars (matches Kubernetes secret)
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "flash")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "flashpass")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "orders")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}"
 
 db_pool: Optional[asyncpg.Pool] = None
 
@@ -60,8 +63,14 @@ async def lifespan(app: FastAPI):
         # Create orders table if it doesn't exist
         async with db_pool.acquire() as conn:
             await conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS orders_order_id_seq
+            """)
+
+            await conn.execute("""
                 CREATE TABLE IF NOT EXISTS orders (
                     id SERIAL PRIMARY KEY,
+                    order_id VARCHAR(50) UNIQUE NOT NULL
+                        DEFAULT ('ord-' || nextval('orders_order_id_seq')),
                     user_id VARCHAR(255) NOT NULL,
                     product_id VARCHAR(255) NOT NULL,
                     reservation_id VARCHAR(255) NOT NULL,
@@ -69,6 +78,33 @@ async def lifespan(app: FastAPI):
                     status VARCHAR(50) DEFAULT 'CONFIRMED',
                     created_at TIMESTAMP DEFAULT NOW()
                 )
+            """)
+
+            await conn.execute("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS id BIGSERIAL
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS order_id VARCHAR(50)
+            """)
+            await conn.execute("""
+                UPDATE orders
+                SET order_id = 'ord-' || id::text
+                WHERE order_id IS NULL
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ALTER COLUMN order_id SET DEFAULT
+                    ('ord-' || nextval('orders_order_id_seq'))
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ALTER COLUMN order_id SET NOT NULL
+            """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS orders_id_key
+                ON orders(id)
             """)
             
             # Create index for faster lookups

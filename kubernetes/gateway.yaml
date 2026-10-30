@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: gateway-service
+  name: gateway
   namespace: dffs
 spec:
   replicas: 2
@@ -15,30 +15,45 @@ spec:
     spec:
       containers:
       - name: gateway
-        image: dffs/gateway:v1
+        image: dffs-gateway:latest  # ← FIXED
         imagePullPolicy: Never
         ports:
         - containerPort: 8000
         env:
         - name: REDIS_HOST
-          value: "redis-service"
+          value: "redis"  # ← Matches redis Service name
         - name: INVENTORY_URL
-          value: "http://inventory-service:8000"
+          value: "http://inventory:8000"  # ← FIXED (removed -service)
         - name: CHECKOUT_URL
-          value: "http://checkout-service:8000"
-        # Bug Fix: Add CPU/memory resource requests and limits for HPA
+          value: "http://checkout:8000"  # ← FIXED (removed -service)
+        - name: PAYMENT_URL  # ← ADDED
+          value: "http://payment-gateway:8000"
+        - name: ADMISSION_URL
+          value: "http://admission:8000"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
         resources:
           requests:
-            cpu: "100m"      # 0.1 CPU core minimum
-            memory: "128Mi"  # 128 MB minimum
+            cpu: "100m"
+            memory: "128Mi"
           limits:
-            cpu: "500m"      # 0.5 CPU core maximum
-            memory: "512Mi"  # 512 MB maximum
+            cpu: "500m"
+            memory: "512Mi"
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: gateway-service
+  name: gateway
   namespace: dffs
 spec:
   type: NodePort

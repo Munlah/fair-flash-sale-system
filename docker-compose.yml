@@ -13,7 +13,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U flash_user -d flash_db"]
+      test: [ "CMD-SHELL", "pg_isready -U flash_user -d flash_db" ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
     ports:
       - "6379:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
       timeout: 3s
       retries: 5
@@ -46,13 +46,30 @@ services:
       context: ./services/checkout-service
     container_name: checkout-service
     environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: flash_user
+      POSTGRES_PASSWORD: flash_pass
+      POSTGRES_DB: flash_db
       DATABASE_URL: postgresql://flash_user:flash_pass@postgres:5432/flash_db
     depends_on:
       postgres:
-        condition: service_healthy  # Wait for postgres to be ready
+        condition: service_healthy # Wait for postgres to be ready
     ports:
       - "8002:8000"
-    restart: on-failure  # Retry if startup fails
+    restart: on-failure # Retry if startup fails
+
+  payment-gateway:
+    build:
+      context: ./services/payment-gateway
+    container_name: payment-gateway
+    environment:
+      PAYMENT_FAILURE_RATE: ${PAYMENT_FAILURE_RATE:-0.1}
+      PAYMENT_TIMEOUT_RATE: ${PAYMENT_TIMEOUT_RATE:-0.0}
+      PAYMENT_MIN_DELAY: ${PAYMENT_MIN_DELAY:-0.5}
+      PAYMENT_MAX_DELAY: ${PAYMENT_MAX_DELAY:-2.0}
+    ports:
+      - "8003:8000"
+    restart: on-failure
 
   admission-service:
     build:
@@ -80,6 +97,8 @@ services:
       REDIS_HOST: redis
       INVENTORY_URL: http://inventory-service:8000
       CHECKOUT_URL: http://checkout-service:8000
+      PAYMENT_URL: http://payment-gateway:8000
+      ADMISSION_URL: http://admission-service:8000
     depends_on:
       redis:
         condition: service_healthy
@@ -87,8 +106,10 @@ services:
         condition: service_started
       checkout-service:
         condition: service_started
+      payment-gateway:
+        condition: service_started
     ports:
-      - "8000:8000"
+      - "8005:8000"
 
   web-ui:
     image: nginx:alpine

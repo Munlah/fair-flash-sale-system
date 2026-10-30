@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: checkout-service
+  name: checkout
   namespace: dffs
 spec:
   replicas: 2
@@ -15,23 +15,44 @@ spec:
     spec:
       containers:
       - name: checkout
-        image: dffs/checkout:v1
+        image: dffs-checkout:latest  # ← FIXED
         imagePullPolicy: Never
         ports:
         - containerPort: 8000
         env:
-        - name: DATABASE_URL
+        - name: POSTGRES_HOST
+          value: "postgres"
+        - name: POSTGRES_USER
           valueFrom:
             secretKeyRef:
               name: postgres-secret
-              key: database-url
-        - name: REDIS_HOST
-          value: "redis-service"
-        # Bug Fix: Add CPU/memory resource requests and limits
+              key: POSTGRES_USER
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_PASSWORD
+        - name: POSTGRES_DB
+          valueFrom:
+            secretKeyRef:
+              name: postgres-secret
+              key: POSTGRES_DB
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 5
+          periodSeconds: 5
         resources:
           requests:
             cpu: "100m"
-            memory: "256Mi"  # More memory for database operations
+            memory: "256Mi"
           limits:
             cpu: "500m"
             memory: "512Mi"
@@ -39,7 +60,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: checkout-service
+  name: checkout  # ← FIXED (removed -service)
   namespace: dffs
 spec:
   selector:

@@ -1,0 +1,31 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: payment-reconciler
+  namespace: dffs
+spec:
+  schedule: "*/2 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      activeDeadlineSeconds: 120
+      backoffLimit: 1
+      template:
+        spec:
+          containers:
+          - name: reconciler
+            image: dffs-gateway:latest
+            imagePullPolicy: Never
+            command: ["python", "reconciler.py"]
+            env:
+            - name: REDIS_HOST
+              value: "redis"
+            - name: PAYMENT_URL
+              value: "http://payment-gateway:8000"
+            - name: CHECKOUT_URL
+              value: "http://checkout:8000"
+            - name: INVENTORY_URL
+              value: "http://inventory:8000"
+          restartPolicy: OnFailure
