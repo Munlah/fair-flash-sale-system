@@ -1,6 +1,5 @@
 """
 Locust Load Test for Fair Flash Sale System
-
 Simulates realistic user behavior:
 1. Join the queue
 2. Poll status every 500ms until admitted
@@ -16,7 +15,7 @@ from locust import HttpUser, task, between, events
 class FlashSaleUser(HttpUser):
     """Simulates a user trying to buy in a flash sale"""
     
-    # Wait 0.5-2 seconds between actions
+    #Wait 0.5-2 seconds between actions
     wait_time = between(0.5, 2)
     
     def on_start(self):
@@ -26,7 +25,7 @@ class FlashSaleUser(HttpUser):
         self.admitted = False
         self.purchased = False
         
-        # Join the queue immediately
+        #Join the queue immediately
         self.join_queue()
     
     def join_queue(self):
@@ -64,7 +63,7 @@ class FlashSaleUser(HttpUser):
                     self.admitted = True
                     print(f"✓ {self.user_id} ADMITTED!")
                     response.success()
-                    # Try to purchase immediately
+                    #Try to purchase immediately
                     self.purchase()
                 elif status == "waiting":
                     response.success()
@@ -117,7 +116,7 @@ class FlashSaleUser(HttpUser):
 def on_test_start(environment, **kwargs):
     """Called when the load test starts"""
     print("\n" + "="*50)
-    print("🚀 LOAD TEST STARTING")
+    print("LOAD TEST STARTING")
     print("="*50)
     print(f"Target: {environment.host}")
     print(f"Users: {environment.runner.target_user_count if hasattr(environment.runner, 'target_user_count') else 'N/A'}")
@@ -128,7 +127,7 @@ def on_test_start(environment, **kwargs):
 def on_test_stop(environment, **kwargs):
     """Called when the load test stops"""
     print("\n" + "="*50)
-    print("✅ LOAD TEST COMPLETE")
+    print("LOAD TEST COMPLETE")
     print("="*50)
     print("Check the Locust web UI for detailed results")
     print("="*50 + "\n")

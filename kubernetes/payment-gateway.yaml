@@ -21,9 +21,9 @@ spec:
         - containerPort: 8000
         env:
         - name: PAYMENT_FAILURE_RATE
-          value: "0.1"
+          value: "0.3"
         - name: PAYMENT_TIMEOUT_RATE
-          value: "0.0"  # ← Default to 0
+          value: "0.0" 
         - name: PAYMENT_MIN_DELAY
           value: "0.5"
         - name: PAYMENT_MAX_DELAY

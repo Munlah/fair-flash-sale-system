@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: checkout
-        image: dffs-checkout:latest  # ← FIXED
+        image: dffs-checkout:latest 
         imagePullPolicy: Never
         ports:
         - containerPort: 8000
@@ -60,7 +60,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: checkout  # ← FIXED (removed -service)
+  name: checkout 
   namespace: dffs
 spec:
   selector:

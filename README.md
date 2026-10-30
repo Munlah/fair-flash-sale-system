@@ -247,11 +247,24 @@ service health, queue admission, purchase persistence, idempotency, payment
 behavior, pod recovery, Redis persistence, reservation release, concurrent
 users, Redis leader election, and database consistency.
 
+The normal demo uses a 30% simulated payment failure rate. The comprehensive
+test suite changes the Kubernetes payment deployment to 20% at startup so the
+payment checks remain realistic without making the suite unnecessarily flaky.
+You can override the test rate with a decimal value between 0 and 1:
+
+```powershell
+.\experiments\comprehensive-test.ps1 -PaymentFailureRate 0.2
+```
+
 Run it from PowerShell after deploying Kubernetes:
 
 ```powershell
 .\experiments\comprehensive-test.ps1
 ```
+
+The Locust experiment runner also uses a 20% payment failure rate by default.
+Use `--payment-failure-rate` to override it. The Compose demo remains at 30%
+unless `PAYMENT_FAILURE_RATE` is explicitly set.
 
 It is a smoke and resilience suite, not a full production test. A passing
 run means the main demo paths work in the current environment; it does not

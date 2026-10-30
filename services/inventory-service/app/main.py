@@ -1,6 +1,4 @@
-# services/inventory-service/app/main.py
-#
-# Inventory & Reservation Service
+#Inventory & Reservation Service
 # --------------------------------
 # Reserves a unit of stock as a single atomic Redis operation (Lua script),
 # so concurrent requests can never both succeed for the last item. Each
@@ -32,9 +30,9 @@ redis_client = redis.Redis(
     decode_responses=True,
 )
 
-RESERVATION_TIMEOUT = int(os.getenv("RESERVATION_TIMEOUT", "300"))  # seconds
+RESERVATION_TIMEOUT = int(os.getenv("RESERVATION_TIMEOUT", "300"))  #seconds
 
-# Atomic: check stock -> decrement -> record reservation, all in one Redis call.
+#Atomic: check stock -> decrement -> record reservation, all in one Redis call.
 RESERVE_SCRIPT = """
 local stock = redis.call('GET', KEYS[1])
 

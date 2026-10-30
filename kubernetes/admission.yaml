@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
       - name: admission
-        image: dffs-admission:latest  # ← FIXED
+        image: dffs-admission:latest
         imagePullPolicy: Never
         env:
         - name: REDIS_HOST
@@ -53,7 +53,7 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: admission  # ← Changed to match other services (optional, not actually used)
+  name: admission
   namespace: dffs
 spec:
   selector:

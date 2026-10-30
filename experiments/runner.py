@@ -1,5 +1,4 @@
 """Compare admission modes with the latency-group Locust test.
-
 Each run resets the demo data, runs Locust, checks that the database and
 inventory still agree, and writes CSV/graph files to experiments/results.
 This is an experiment script, not a unit-test runner.
@@ -32,6 +31,7 @@ INITIAL_STOCK = int(os.getenv("INITIAL_STOCK", "100"))
 TEST_DURATION = os.getenv("TEST_DURATION", "60s")
 TOTAL_USERS = int(os.getenv("TOTAL_USERS", "300"))
 SPAWN_RATE = int(os.getenv("SPAWN_RATE", "50"))
+PAYMENT_FAILURE_RATE = os.getenv("PAYMENT_FAILURE_RATE", "0.2")
 MODES = ("windowed", "fifo", "random", "none")
 OUTPUT_DIR = Path(
     os.getenv("EXPERIMENT_OUTPUT_DIR", str(PROJECT_ROOT / "experiments" / "results"))
@@ -40,7 +40,7 @@ OUTPUT_DIR = Path(
 
 class ExperimentRunner:
     def __init__(self, modes=None, users=None, spawn_rate=None, run_time=None,
-                 locust_file=None):
+                 locust_file=None, payment_failure_rate=None):
         self.redis_client = redis.Redis(host=REDIS_HOST, decode_responses=True)
         self.results = []
         self.timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -48,6 +48,7 @@ class ExperimentRunner:
         self.users = users or TOTAL_USERS
         self.spawn_rate = spawn_rate or SPAWN_RATE
         self.run_time = run_time or TEST_DURATION
+        self.payment_failure_rate = payment_failure_rate or PAYMENT_FAILURE_RATE
         self.locust_file = Path(locust_file or PROJECT_ROOT / "locust" / "latency_groups.py")
         if not self.locust_file.is_absolute():
             self.locust_file = PROJECT_ROOT / self.locust_file
@@ -73,6 +74,16 @@ class ExperimentRunner:
             ["docker", "compose", "up", "-d", "--force-recreate", "admission-service"],
             check=True,
             env={**os.environ, "ADMISSION_MODE": mode},
+            cwd=PROJECT_ROOT,
+        )
+        time.sleep(5)
+
+    def restart_payment_service(self):
+        """Use a lower failure rate for repeatable automated experiments."""
+        subprocess.run(
+            ["docker", "compose", "up", "-d", "--force-recreate", "payment-gateway"],
+            check=True,
+            env={**os.environ, "PAYMENT_FAILURE_RATE": self.payment_failure_rate},
             cwd=PROJECT_ROOT,
         )
         time.sleep(5)
@@ -217,6 +228,7 @@ class ExperimentRunner:
             plt.close(figure)
 
     async def run(self):
+        self.restart_payment_service()
         for mode in self.modes:
             await self.run_mode(mode)
             await asyncio.sleep(5)
@@ -251,6 +263,11 @@ def parse_args():
     parser.add_argument("--spawn-rate", type=int, default=None)
     parser.add_argument("--run-time", default=None, help="Locust duration, e.g. 30s")
     parser.add_argument(
+        "--payment-failure-rate",
+        default=PAYMENT_FAILURE_RATE,
+        help="Payment failure rate for experiments (default: 20%%)",
+    )
+    parser.add_argument(
         "--locust-file",
         default=str(PROJECT_ROOT / "locust" / "latency_groups.py"),
         help="Locust file to execute",
@@ -275,6 +292,7 @@ if __name__ == "__main__":
                 spawn_rate=arguments.spawn_rate,
                 run_time=arguments.run_time,
                 locust_file=arguments.locust_file,
+                payment_failure_rate=arguments.payment_failure_rate,
             ).run()
         )
     except (RuntimeError, subprocess.CalledProcessError) as exc:

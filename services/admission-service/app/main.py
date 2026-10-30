@@ -1,5 +1,4 @@
 """Admission controller for the flash-sale waiting room.
-
 The service reads waiting tokens from Redis and moves a limited number to
 ``admitted`` on every tick. The windowed mode shuffles users inside a closed
 time window while keeping older windows ahead of newer ones.
@@ -17,7 +16,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from leader_election import run_with_leader_election
 
-# The controller and gateway share this Redis instance.
+#The controller and gateway share this Redis instance.
 redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=6379,
@@ -184,7 +183,7 @@ async def admission_loop():
     """Main admission loop with leader election"""
     print(f"🚀 ADMISSION LOOP STARTED ({ADMISSION_MODE}) WITH LEADER ELECTION 🚀")
     
-    # Run admission loop with leader election
+    #Run admission loop with leader election
     await run_with_leader_election(admission_loop_iteration)
 
 
@@ -217,7 +216,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Admission Controller", lifespan=lifespan)
 
-# The browser dashboard calls this service for queue statistics.
+#The browser dashboard calls this service for queue statistics.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -236,7 +235,7 @@ def health():
             "status": "healthy",
             "redis": "connected",
             "mode": ADMISSION_MODE,
-            "leader_election": "enabled",  # ← ADD THIS
+            "leader_election": "enabled", 
         }
     except redis.RedisError:
         return {

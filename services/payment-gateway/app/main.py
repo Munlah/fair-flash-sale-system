@@ -1,10 +1,6 @@
 """Small mock payment provider used by the demo and load tests.
-
 Payments are intentionally in memory. That keeps the demo simple, but it also
 means a payment pod restart clears its local payment records.
-"""
-
-"""
 Payment Gateway Service - Mock payment processor
 ==========================================================================
 Simulates realistic payment gateway behavior including:
@@ -34,12 +30,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory payment storage (Redis would be used in production)
+#In-memory payment storage (Redis would be used in production)
 payments: Dict[str, dict] = {}
 
-# Configuration
-FAILURE_RATE = float(os.getenv("PAYMENT_FAILURE_RATE", "0.1"))  # 10% by default
-TIMEOUT_RATE = float(os.getenv("PAYMENT_TIMEOUT_RATE", "0.05"))  # 5% by default
+#Configuration
+FAILURE_RATE = float(os.getenv("PAYMENT_FAILURE_RATE", "0.3"))  #30% for the demo
+TIMEOUT_RATE = float(os.getenv("PAYMENT_TIMEOUT_RATE", "0.05"))  #5% by default
 MIN_DELAY = float(os.getenv("PAYMENT_MIN_DELAY", "0.5"))
 MAX_DELAY = float(os.getenv("PAYMENT_MAX_DELAY", "2.0"))
 
@@ -53,7 +49,7 @@ class ChargeRequest(BaseModel):
 
 class ChargeResponse(BaseModel):
     payment_id: str
-    status: str  # "succeeded", "failed", "processing"
+    status: str  #"succeeded", "failed", "processing"
     amount: float
     user_id: str
 
@@ -74,27 +70,26 @@ async def health():
 async def charge(request: ChargeRequest):
     """
     Process a payment charge with realistic failure scenarios
-    
     Idempotent: Same idempotency_key returns the same result
     """
     
-    # Check if payment already exists (idempotency)
+    #Check if payment already exists(idempotency)
     if request.idempotency_key in payments:
         existing = payments[request.idempotency_key]
         return ChargeResponse(**existing)
     
-    # Simulate network delay
+    #Simulate network delay
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
     time.sleep(delay)
     
-    # Simulate timeout (gateway doesn't respond)
+    #Simulate timeout(gateway doesn't respond)
     if random.random() < TIMEOUT_RATE:
-        # In reality this would hang, but we'll raise 503
-        # The gateway will timeout waiting and not know the result
+        #In reality this would hang, but we'll raise 503
+        #The gateway will timeout waiting and not know the result
         time.sleep(5)  # Extra delay before timeout
         raise HTTPException(status_code=503, detail="Gateway timeout")
     
-    # Simulate random failures
+    #Simulate random failures
     if random.random() < FAILURE_RATE:
         payment_id = f"pay_{uuid.uuid4().hex[:16]}"
         payment_record = {
@@ -102,12 +97,12 @@ async def charge(request: ChargeRequest):
             "status": "failed",
             "amount": request.amount,
             "user_id": request.user_id,
-            "reason": "insufficient_funds"  # or card_declined, etc.
+            "reason": "insufficient_funds"  #or card_declined, etc.
         }
         payments[request.idempotency_key] = payment_record
         return ChargeResponse(**payment_record)
     
-    # Success - record payment
+    #Success, record payment
     payment_id = f"pay_{uuid.uuid4().hex[:16]}"
     payment_record = {
         "payment_id": payment_id,

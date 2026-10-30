@@ -11,8 +11,8 @@ import redis.asyncio as redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = 6379
 LEADER_KEY = "admission:leader"
-LEADER_TTL = 10  # Leader lock expires after 10 seconds
-HOSTNAME = socket.gethostname()  # Unique pod identifier
+LEADER_TTL = 10  #Leader lock expires after 10 seconds
+HOSTNAME = socket.gethostname()  #Unique pod identifier
 
 class LeaderElection:
     def __init__(self):
@@ -32,7 +32,7 @@ class LeaderElection:
         if not self.client:
             await self.connect()
         
-        # Try to set the leader key with NX (only if it doesn't exist)
+        #Try to set the leader key with NX (only if it doesn't exist)
         acquired = await self.client.set(
             LEADER_KEY,
             HOSTNAME,
@@ -45,10 +45,10 @@ class LeaderElection:
             print(f"✓ [{HOSTNAME}] Became leader")
             return True
         
-        # Check if we're still the leader (in case of renewal)
+        #Check if we're still the leader (in case of renewal)
         current_leader = await self.client.get(LEADER_KEY)
         if current_leader == HOSTNAME:
-            # Renew our leadership
+            #Renew our leadership
             await self.client.expire(LEADER_KEY, LEADER_TTL)
             self.is_leader = True
             return True
@@ -101,23 +101,23 @@ async def run_with_leader_election(admission_loop_func):
     
     try:
         while True:
-            # Try to become leader
+            #Try to become leader
             is_leader = await leader.try_acquire_leadership()
             
             if is_leader:
-                # Run one iteration of the admission loop
+                #Run one iteration of the admission loop
                 try:
                     await admission_loop_func()
                 except Exception as e:
                     print(f"✗ [{HOSTNAME}] Error in admission loop: {e}")
                 
-                # Renew leadership every iteration
+                #Renew leadership every iteration
                 await leader.renew_leadership()
                 
-                # Sleep based on tick rate
+                #Sleep based on tick rate
                 await asyncio.sleep(1)
             else:
-                # Standby mode - wait longer before trying again
+                #Standby mode, wait longer before trying again
                 current_leader = await leader.client.get(LEADER_KEY)
                 print(f"⏸ [{HOSTNAME}] Standby mode (leader: {current_leader})")
                 await asyncio.sleep(5)

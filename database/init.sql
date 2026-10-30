@@ -1,4 +1,3 @@
--- database/init.sql
 CREATE SEQUENCE IF NOT EXISTS orders_order_id_seq;
 
 CREATE TABLE IF NOT EXISTS orders (

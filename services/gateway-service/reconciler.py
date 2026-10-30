@@ -35,7 +35,7 @@ async def reconcile_pending_transactions():
                     
                     print(f"🔍 Verifying transaction: {token}")
                     
-                    # Check payment status
+                    #Check payment status
                     async with httpx.AsyncClient(timeout=5.0) as http_client:
                         try:
                             payment_resp = await http_client.get(
@@ -46,13 +46,13 @@ async def reconcile_pending_transactions():
                                 payment_data = payment_resp.json()
                                 
                                 if payment_data.get("status") == "succeeded":
-                                    # Payment succeeded - complete the order
+                                    #Payment succeeded - complete the order
                                     print(f"✓ Payment succeeded, completing order for {token}")
                                     
-                                    # Get reservation_id (should be stored in token data)
+                                    #Get reservation_id (should be stored in token data)
                                     reservation_id = token_data.get("reservation_id")
                                     
-                                    # Create order
+                                    #Create order
                                     order_resp = await http_client.post(
                                         f"{CHECKOUT_URL}/order",
                                         json={
@@ -69,7 +69,7 @@ async def reconcile_pending_transactions():
                                         print(f"✓ Order completed for {token}")
                                 
                                 elif payment_data.get("status") == "failed":
-                                    # Payment failed - release reservation
+                                    #Payment failed, release reservation
                                     print(f"✗ Payment failed, releasing reservation for {token}")
                                     
                                     reservation_id = token_data.get("reservation_id")
@@ -101,9 +101,9 @@ async def run_reconciler():
         try:
             await reconcile_pending_transactions()
         except Exception as e:
-            print(f"✗ Reconciler error: {e}")
+            print(f"Reconciler error: {e}")
         
-        await asyncio.sleep(30)  # Run every 30 seconds
+        await asyncio.sleep(30)  #Run every 30 seconds
 
 if __name__ == "__main__":
     asyncio.run(reconcile_pending_transactions())

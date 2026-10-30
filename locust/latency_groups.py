@@ -1,5 +1,4 @@
 """Load test that compares users with different simulated network speeds.
-
 The three user classes below use the same queue and purchase flow. The only
 thing that changes is the artificial delay before requests. This lets the
 experiment compare fairness without needing three different applications.
@@ -7,7 +6,6 @@ experiment compare fairness without needing three different applications.
 
 import random
 import time
-
 from locust import HttpUser, between, task
 
 

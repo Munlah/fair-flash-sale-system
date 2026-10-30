@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fair Flash Sale - Live Demo</title>
+    <title>Fair Flash Sale Live Demo</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>⚡ Fair Flash Sale System</h1>
+            <h1>Fair Flash Sale System</h1>
             <p class="subtitle">Windowed-random admission, resilient checkout, and live recovery</p>
             <div class="system-banner" id="systemBanner">
                 <span class="pulse"></span>
@@ -31,49 +31,54 @@
                 <div class="stat-value" id="orders">--</div>
             </div>
             <div class="stat">
-                <div class="stat-label">Payment Success Rate</div>
+                <div class="stat-label">Observed Payment Success</div>
                 <div class="stat-value" id="paymentRate">--</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Configured Failure Chance</div>
+                <div class="stat-value" id="configuredFailureRate">--</div>
             </div>
         </div>
 
         <div class="grid">
             <div class="card full-width">
                 <div class="section-heading">
-                    <h2>🛰️ Live Service Health</h2>
+                    <h2>Live Service Health</h2>
                     <span class="last-updated" id="lastUpdated">Waiting for first update</span>
                 </div>
                 <div id="serviceHealth" class="service-health"></div>
             </div>
 
             <div class="card">
-                <h2>🎟️ Join Waiting Room</h2>
+                <h2>Join Waiting Room</h2>
                 <input type="text" id="userId" placeholder="Enter your user ID" value="demo-user">
                 <input type="text" id="productId" placeholder="Product ID" value="phone">
                 <button onclick="joinQueue()">Join Queue</button>
             </div>
 
             <div class="card">
-                <h2>⚙️ Admin Controls</h2>
+                <h2>Admin Controls</h2>
                 <input type="number" id="stockAmount" placeholder="Stock quantity" value="100">
                 <button onclick="setStock()">Set Stock</button>
+                <p class="control-help">Payment failure chance is fixed at 30% for the demo. The automated test suite uses 20% to reduce random test failures.</p>
                 <button class="secondary" onclick="refreshStats()">Refresh Stats</button>
                 <button class="secondary danger" onclick="clearAllTokens()">Clear All Tokens</button>
             </div>
 
             <div class="card full-width">
-                <h2>🎫 My Tokens (<span id="tokenCount">0</span>)</h2>
+                <h2>My Tokens (<span id="tokenCount">0</span>)</h2>
                 <div id="tokenList" class="token-list">
                     <p class="empty-message">Join the queue to see your tokens here</p>
                 </div>
             </div>
 
             <div class="card full-width">
-                <h2>📝 Activity Log</h2>
+                <h2>Activity Log</h2>
                 <div class="log" id="activityLog"></div>
             </div>
 
             <div class="card full-width">
-                <h2>🎬 Demo Story</h2>
+                <h2>Demo Story</h2>
                 <div class="demo-steps">
                     <div class="demo-step"><span>1</span><strong>Join</strong><small>Enter the waiting room</small></div>
                     <div class="demo-step"><span>2</span><strong>Admit</strong><small>Fair cohort selection</small></div>
@@ -88,7 +93,7 @@
         </div>
 
         <div class="card full-width">
-            <h2>🎯 How Windowed-Random Admission Works</h2>
+            <h2>How Windowed-Random Admission Works</h2>
             <p class="explanation">
                 This system groups users into <strong>3-second cohorts</strong> based on when they join.
                 Within each cohort, admission order is <strong>randomized</strong> (eliminating
@@ -99,6 +104,6 @@
         </div>
     </div>
 
-    <script src="js/app.js"></script>
+    <script src="js/app.js?v=20261031-5"></script>
 </body>
 </html>

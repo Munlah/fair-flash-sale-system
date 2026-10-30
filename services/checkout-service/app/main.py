@@ -6,7 +6,6 @@ Handles:
 - Order retrieval by ID, token, or idempotency key
 - Database connection pooling to prevent exhaustion
 - Automatic table creation on startup
-
 Uses PostgreSQL for durable order storage with UNIQUE constraints
 to prevent duplicate orders even under concurrent requests.
 ==========================================================================
@@ -26,7 +25,7 @@ from pydantic import BaseModel
 # Configuration - Read from environment variables
 # ==========================================================================
 
-# Build DATABASE_URL from individual env vars (matches Kubernetes secret)
+#Build DATABASE_URL from individual env vars (matches Kubernetes secret)
 POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
 POSTGRES_USER = os.getenv("POSTGRES_USER", "flash")
 POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "flashpass")
@@ -51,7 +50,7 @@ async def lifespan(app: FastAPI):
     global db_pool
     
     try:
-        # Create connection pool
+        #Create connection pool
         db_pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=5,
@@ -60,7 +59,7 @@ async def lifespan(app: FastAPI):
         )
         print(f"✓ Database pool created: {DATABASE_URL}")
         
-        # Create orders table if it doesn't exist
+        #Create orders table if it doesn't exist
         async with db_pool.acquire() as conn:
             await conn.execute("""
                 CREATE SEQUENCE IF NOT EXISTS orders_order_id_seq
@@ -107,7 +106,7 @@ async def lifespan(app: FastAPI):
                 ON orders(id)
             """)
             
-            # Create index for faster lookups
+            #Create index for faster lookups
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_orders_idempotency_key 
                 ON orders(idempotency_key)
@@ -126,7 +125,7 @@ async def lifespan(app: FastAPI):
     
     yield
     
-    # Shutdown: close pool
+    #Shutdown: close pool
     if db_pool:
         await db_pool.close()
         print("✓ Database pool closed")
@@ -137,7 +136,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Checkout Service", version="1.0.0", lifespan=lifespan)
 
-# Enable CORS
+#Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -155,7 +154,7 @@ class OrderRequest(BaseModel):
     user_id: str
     product_id: str
     reservation_id: str
-    idempotency_key: str  # Prevents duplicate orders (usually the token)
+    idempotency_key: str  #Prevents duplicate orders (usually the token)
 
 class OrderResponse(BaseModel):
     """Response after creating or retrieving an order"""
@@ -165,7 +164,7 @@ class OrderResponse(BaseModel):
     reservation_id: str
     idempotency_key: str
     status: str
-    created_at: str  # Changed to str for JSON serialization
+    created_at: str  #Changed to str for JSON serialization
 
 # ==========================================================================
 # Health Check Endpoint
@@ -209,7 +208,7 @@ async def create_order(order: OrderRequest):
     try:
         async with db_pool.acquire() as conn:
             
-            # Check if order already exists (idempotency)
+            #Check if order already exists (idempotency)
             existing = await conn.fetchrow(
                 """
                 SELECT id, user_id, product_id, reservation_id, 
@@ -221,7 +220,7 @@ async def create_order(order: OrderRequest):
             )
             
             if existing:
-                # Order already exists - return it
+                #Order already exists - return it
                 return OrderResponse(
                     id=existing['id'],
                     user_id=existing['user_id'],
@@ -232,7 +231,7 @@ async def create_order(order: OrderRequest):
                     created_at=existing['created_at'].isoformat()
                 )
             
-            # Create new order with ON CONFLICT to handle race conditions
+            #Create new order with ON CONFLICT to handle race conditions
             result = await conn.fetchrow(
                 """
                 INSERT INTO orders (user_id, product_id, reservation_id, idempotency_key, status, created_at)
@@ -247,7 +246,7 @@ async def create_order(order: OrderRequest):
             )
             
             if result:
-                # Successfully created new order
+                #Successfully created new order
                 return OrderResponse(
                     id=result['id'],
                     user_id=result['user_id'],
@@ -258,7 +257,7 @@ async def create_order(order: OrderRequest):
                     created_at=result['created_at'].isoformat()
                 )
             else:
-                # ON CONFLICT triggered - fetch the existing order
+                #ON CONFLICT triggered - fetch the existing order
                 existing = await conn.fetchrow(
                     """
                     SELECT id, user_id, product_id, reservation_id, 
@@ -334,7 +333,6 @@ async def get_order(order_id: int):
 async def get_order_by_idempotency(idempotency_key: str):
     """
     Get order by idempotency key (usually the queue token)
-    
     This endpoint is used by the gateway to check if an order already exists
     before attempting to reserve stock (fixes the retry leak bug).
     """

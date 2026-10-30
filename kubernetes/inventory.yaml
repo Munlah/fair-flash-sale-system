@@ -22,7 +22,6 @@ spec:
         env:
         - name: REDIS_HOST
           value: "redis"
-        # Bug Fix: Add CPU/memory resource requests and limits
         resources:
           requests:
             cpu: "100m"

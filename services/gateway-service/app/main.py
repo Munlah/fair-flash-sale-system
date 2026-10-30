@@ -1,4 +1,3 @@
-# services/gateway-service/app/main.py
 """
 Gateway Service - Entry point for all user requests
 ==========================================================================
@@ -37,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Gateway Service", version="1.0.0")
 
-# Enable CORS
+#Enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -83,6 +82,8 @@ class PurchaseResponse(BaseModel):
     success: bool
     order: Optional[dict] = None
     reason: Optional[str] = None
+
+
 
 # ==========================================================================
 # Endpoints
@@ -138,6 +139,7 @@ async def dashboard_snapshot(product_id: str = "phone"):
             "queue": None,
             "orders": None,
             "payments": None,
+            "payment_config": None,
         }
 
         try:
@@ -164,6 +166,13 @@ async def dashboard_snapshot(product_id: str = "phone"):
         except Exception:
             pass
 
+        payment_health = next(
+            (service for service in health_results if service["service"] == "payment"),
+            None,
+        )
+        if payment_health:
+            snapshot["payment_config"] = payment_health["details"].get("config")
+
         return snapshot
 
 
@@ -174,7 +183,7 @@ async def join_queue(user_id: str, product_id: str):
     """
     user_product_key = f"active_token:{user_id}:{product_id}"
     
-    # Check stock before joining queue
+    #Check stock before joining queue
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{INVENTORY_URL}/stock/{product_id}")
@@ -187,10 +196,10 @@ async def join_queue(user_id: str, product_id: str):
     except ValueError:
         logger.warning(f"Could not check stock for %s; allowing queue join: %s", product_id)
     
-    # Generate token
+    #Generate token
     token = str(uuid.uuid4())
     
-    # Atomic check: ensure user doesn't already have a token for this product
+    #Atomic check: ensure user doesn't already have a token for this product
     token_claimed = await redis_async(
         redis_client.set,
         user_product_key,
@@ -217,7 +226,7 @@ async def join_queue(user_id: str, product_id: str):
             position=position if position is not None else 0
         )
     
-    # Store token data
+    #Store token data
     arrival_ms = int(time.time() * 1000)
     
     pipe = redis_client.pipeline()
@@ -269,7 +278,7 @@ async def purchase(token: str):
     
     status = token_data.get("status")
     
-    # Check if already completed
+    #Check if already completed
     if status == "completed":
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -283,7 +292,7 @@ async def purchase(token: str):
     if status != "admitted":
         return PurchaseResponse(success=False, reason=f"Token not admitted (status: {status})")
     
-    # Atomic transition to "processing"
+    #Atomic transition to "processing"
     lua_script = """
     local token_key = KEYS[1]
     local current_status = redis.call('HGET', token_key, 'status')
@@ -309,7 +318,7 @@ async def purchase(token: str):
     product_id = token_data.get("product_id", "phone")
     reservation_id = None
     
-    # Reserve stock
+    #Reserve stock
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(f"{INVENTORY_URL}/reserve/{product_id}")
@@ -429,7 +438,7 @@ async def purchase(token: str):
             reason=f"Order creation failed: {exc}",
         )
     
-    # Success
+    #Success
     await redis_async(redis_client.hset, f"token:{token}", "status", "completed")
     user_product_key = f"active_token:{user_id}:{product_id}"
     await redis_async(redis_client.delete, user_product_key)
@@ -447,3 +456,29 @@ async def get_stock(product_id: str):
             return response.json()
     except Exception as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post("/stock/{product_id}/{quantity}")
+async def set_stock(product_id: str, quantity: int):
+    """Proxy the demo stock control through the same public gateway."""
+    if quantity < 0:
+        raise HTTPException(status_code=400, detail="Stock cannot be negative")
+
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            response = await client.post(
+                f"{INVENTORY_URL}/stock/{product_id}/{quantity}"
+            )
+            response.raise_for_status()
+            return response.json()
+    except httpx.HTTPStatusError as exc:
+        detail = exc.response.text or "Inventory rejected the stock update"
+        raise HTTPException(
+            status_code=exc.response.status_code,
+            detail=detail,
+        ) from exc
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Inventory service unavailable: {exc}",
+        ) from exc

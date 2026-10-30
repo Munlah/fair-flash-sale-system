@@ -1,12 +1,32 @@
-// The browser talks to the gateway for queue and purchase actions.
-const API_BASES = ['http://localhost:8000', 'http://localhost:8005'];
+//The browser talks to the gateway for queue and purchase actions.
+const API_BASES = ['http://localhost:8005', 'http://localhost:8000'];
 let API_BASE = API_BASES[0];
 
-// Keep tokens in browser storage so a page refresh does not lose the user's queue view.
+//Keep tokens in browser storage so a page refresh does not lose the user's queue view.
 let tokens = [];
 let statusCheckInterval = null;
 let previousSnapshot = null;
 let dashboardErrorLogged = false;
+
+//Pick the gateway that is actually available. Compose uses 8005 and a
+//Kubernetes port-forward normally uses 8000.
+async function getGatewayBase() {
+    for (const candidate of API_BASES) {
+        try {
+            const response = await fetch(`${candidate}/health`, {
+                method: 'GET',
+                cache: 'no-store'
+            });
+            if (response.ok) {
+                API_BASE = candidate;
+                return API_BASE;
+            }
+        } catch {
+            //Try the next supported local gateway address.
+        }
+    }
+    throw new Error('Gateway is not available on ports 8000 or 8005');
+}
 
 function isValidToken(token) {
     return typeof token === 'string'
@@ -15,7 +35,7 @@ function isValidToken(token) {
         && token !== 'null';
 }
 
-// Start the dashboard refreshers when the page is ready.
+//Start the dashboard refreshers when the page is ready.
 window.onload = () => {
     loadTokensFromStorage();
     refreshStats();
@@ -51,7 +71,7 @@ function saveTokensToStorage() {
     localStorage.setItem('flashSaleTokens', JSON.stringify(tokens));
 }
 
-// Add a short message to the activity log and keep the newest 50 messages.
+//Add a short message to the activity log and keep the newest 50 messages.
 function log(message, type = 'info') {
     const logDiv = document.getElementById('activityLog');
     const entry = document.createElement('div');
@@ -70,26 +90,16 @@ function log(message, type = 'info') {
     }
 }
 
-// Load current stock and queue size for the dashboard.
+//Load current stock and queue size for the dashboard.
 async function refreshStats() {
     try {
-        let response;
-        let lastError;
-        for (const candidate of API_BASES) {
-            try {
-                response = await fetch(`${candidate}/dashboard/snapshot?product_id=phone`);
-                if (response.ok) {
-                    API_BASE = candidate;
-                    break;
-                }
-                lastError = new Error(`dashboard returned HTTP ${response.status}`);
-            } catch (error) {
-                lastError = error;
-            }
-        }
-
-        if (!response || !response.ok) {
-            throw lastError || new Error('No gateway endpoint available');
+        const gateway = await getGatewayBase();
+        const response = await fetch(
+            `${gateway}/dashboard/snapshot?product_id=phone`,
+            { cache: 'no-store' }
+        );
+        if (!response.ok) {
+            throw new Error(`dashboard returned HTTP ${response.status}`);
         }
 
         const snapshot = await response.json();
@@ -104,6 +114,12 @@ async function refreshStats() {
         document.getElementById('paymentRate').textContent = paymentRate === undefined
             ? '--'
             : `${Math.round(paymentRate * 100)}%`;
+        const configuredFailureRate =
+            snapshot.payment_config?.failure_rate;
+        document.getElementById('configuredFailureRate').textContent =
+            configuredFailureRate === undefined
+                ? '--'
+                : `${Math.round(configuredFailureRate * 100)}%`;
 
         const banner = document.getElementById('systemBannerText');
         banner.textContent = healthy === total
@@ -163,7 +179,7 @@ function renderServiceHealth(services) {
     }).join('');
 }
 
-// Submit a new customer to the gateway waiting room.
+//Submit a new customer to the gateway waiting room.
 async function joinQueue() {
     const userId = document.getElementById('userId').value;
     const productId = document.getElementById('productId').value;
@@ -180,24 +196,25 @@ async function joinQueue() {
     }
 
     try {
+        const gateway = await getGatewayBase();
         const response = await fetch(
-            `${API_BASE}/queue/join?user_id=${encodeURIComponent(userId)}&product_id=${encodeURIComponent(productId)}`,
+            `${gateway}/queue/join?user_id=${encodeURIComponent(userId)}&product_id=${encodeURIComponent(productId)}`,
             { method: 'POST' }
         );
 
         if (response.status === 410) {
             const error = await response.json();
             const message = error.detail || 'Product is sold out';
-            log(`✗ ${message}`, 'error');
+            log(`${message}`, 'error');
             return;
         }
 
         if (!response.ok) {
             try {
                 const error = await response.json();
-                log(`✗ Failed to join queue: ${error.detail || 'Unknown error'}`, 'error');
+                log(`Failed to join queue: ${error.detail || 'Unknown error'}`, 'error');
             } catch {
-                log(`✗ Failed to join queue: HTTP ${response.status}`, 'error');
+                log(`Failed to join queue: HTTP ${response.status}`, 'error');
             }
             return;
         }
@@ -206,7 +223,7 @@ async function joinQueue() {
 
         if (!data || !isValidToken(data.token)) {
             console.error('Invalid response data:', data);
-            log('✗ Invalid response from server', 'error');
+            log('Invalid response from server', 'error');
             return;
         }
 
@@ -215,7 +232,7 @@ async function joinQueue() {
         if (existingTokenIndex !== -1) {
             tokens[existingTokenIndex].position = data.position;
             tokens[existingTokenIndex].status = data.status || 'waiting';
-            log(`ℹ Already in queue as ${userId}`, 'info');
+            log(`Already in queue as ${userId}`, 'info');
         } else {
             tokens.push({
                 token: data.token,
@@ -226,14 +243,14 @@ async function joinQueue() {
                 joinedAt: new Date().toISOString()
             });
             const positionText = data.position !== undefined ? `position: ${data.position}` : '';
-            log(`✓ Joined queue as ${userId} ${positionText}`, 'success');
+            log(`Joined queue as ${userId} ${positionText}`, 'success');
         }
 
         tokens = tokens.filter(token => token && isValidToken(token.token));
         saveTokensToStorage();
         renderTokenList();
     } catch (error) {
-        log(`✗ Failed to join queue: ${error.message}`, 'error');
+        log(`Failed to join queue: ${error.message}`, 'error');
     } finally {
         if (joinButton) {
             joinButton.disabled = false;
@@ -242,7 +259,7 @@ async function joinQueue() {
     }
 }
 
-// Check each token regularly so admitted users can complete their purchase.
+//Check each token regularly so admitted users can complete their purchase.
 function startStatusCheckLoop() {
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
@@ -261,14 +278,15 @@ async function checkAllStatuses() {
             continue;
         }
 
-        if (tokenObj.status === 'completed') {
+        if (tokenObj.status === 'completed' || tokenObj.status === 'payment_failed') {
             continue;
         }
 
         try {
-            const response = await fetch(`${API_BASE}/queue/status/${tokenObj.token}`);
+            const gateway = await getGatewayBase();
+            const response = await fetch(`${gateway}/queue/status/${tokenObj.token}`);
             
-            // If token not found (404), remove it from local storage
+            //If token not found (404), remove it from local storage
             if (response.status === 404) {
                 console.log(`Token ${tokenObj.token.substring(0, 8)} not found, removing from list`);
                 tokens = tokens.filter(t => t.token !== tokenObj.token);
@@ -300,15 +318,16 @@ async function checkAllStatuses() {
     }
 }
 
-// Ask the gateway to reserve stock and create an order for an admitted token.
+//Ask the gateway to reserve stock and create an order for an admitted token.
 async function purchase(token) {
     if (!isValidToken(token)) {
-        log('✗ Invalid token', 'error');
+        log('Invalid token', 'error');
         return;
     }
 
     try {
-        const response = await fetch(`${API_BASE}/purchase?token=${encodeURIComponent(token)}`, {
+        const gateway = await getGatewayBase();
+        const response = await fetch(`${gateway}/purchase?token=${encodeURIComponent(token)}`, {
             method: 'POST'
         });
         const data = await response.json();
@@ -322,13 +341,20 @@ async function purchase(token) {
                 renderTokenList();
             }
 
-            log(`✓ Purchase successful! Order ID: ${data.order.id}`, 'success');
+            log(`Purchase successful! Order ID: ${data.order.id}`, 'success');
             refreshStats();
         } else {
-            log(`✗ Purchase failed: ${data.reason || 'Unknown error'}`, 'error');
+            const tokenObj = tokens.find((item) => item.token === token);
+            if (tokenObj && (data.reason || '').toLowerCase().includes('payment failed')) {
+                tokenObj.status = 'payment_failed';
+                tokenObj.reason = data.reason;
+                saveTokensToStorage();
+                renderTokenList();
+            }
+            log(`Purchase failed: ${data.reason || 'Unknown error'} (use a new token)`, 'error');
         }
     } catch (error) {
-        log(`✗ Purchase error: ${error.message}`, 'error');
+        log(`Purchase error: ${error.message}`, 'error');
     }
 }
 
@@ -356,7 +382,7 @@ function clearAllTokens() {
     }
 }
 
-// Render tokens in a stable order: admitted, waiting, then completed.
+//Render tokens in a stable order: admitted, waiting, then completed.
 function renderTokenList() {
     const listDiv = document.getElementById('tokenList');
 
@@ -373,7 +399,7 @@ function renderTokenList() {
     }
 
     const sorted = [...tokens].sort((a, b) => {
-        const order = { 'admitted': 0, 'waiting': 1, 'completed': 2 };
+        const order = { 'admitted': 0, 'waiting': 1, 'payment_failed': 2, 'completed': 3 };
         const statusA = a.status || 'waiting';
         const statusB = b.status || 'waiting';
         return order[statusA] - order[statusB];
@@ -397,6 +423,12 @@ function renderTokenList() {
                     <button class="small" onclick="purchase('${t.token}')">Complete Purchase</button>
                     <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>`;
+        } else if (t.status === 'payment_failed') {
+            buttons = `
+                <div class="button-group">
+                    <button class="small secondary" onclick="removeToken('${t.token}')">Remove Failed Attempt</button>
+                </div>
+                <p class="purchase-result failure">Payment failed. Join with a new user ID.</p>`;
         } else if (t.status === 'completed') {
             buttons = `
                 <div class="button-group">
@@ -426,7 +458,7 @@ function renderTokenList() {
     }).filter(html => html !== '').join('');
 }
 
-// Set the demo product stock through the inventory service.
+//Set the demo product stock through the inventory service.
 async function setStock() {
     const amount = document.getElementById('stockAmount').value;
 
@@ -436,11 +468,16 @@ async function setStock() {
     }
 
     try {
-        const response = await fetch(`${API_BASE}/stock/phone/${amount}`, { method: 'POST' });
+        const gateway = await getGatewayBase();
+        const response = await fetch(`${gateway}/stock/phone/${amount}`, { method: 'POST' });
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `HTTP ${response.status}`);
+        }
         const data = await response.json();
-        log(`✓ Stock set to ${data.stock}`, 'success');
+        log(`Stock set to ${data.stock}`, 'success');
         refreshStats();
     } catch (error) {
-        log(`✗ Failed to set stock: ${error.message}`, 'error');
+        log(`Failed to set stock: ${error.message}`, 'error');
     }
 }

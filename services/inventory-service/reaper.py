@@ -9,7 +9,7 @@ import redis.asyncio as redis
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = 6379
-RESERVATION_TTL = 300  # 5 minutes
+RESERVATION_TTL = 300  #5 minutes
 
 async def reap_expired_reservations():
     """Find and release expired reservations"""
@@ -41,7 +41,7 @@ async def reap_expired_reservations():
                 await client.incr(f"stock:{product_id}")
                 expired_count += 1
                 print(
-                    f"✓ Released expired reservation: {reservation_id} "
+                    f"Released expired reservation: {reservation_id} "
                     f"(product: {product_id})"
                 )
 
@@ -50,22 +50,22 @@ async def reap_expired_reservations():
             await client.zrem("reservation_expirations", reservation_id)
         
         if expired_count > 0:
-            print(f"✓ Reaped {expired_count} expired reservations")
+            print(f"Reaped {expired_count} expired reservations")
         
     finally:
         await client.aclose()
 
 async def run_reaper():
     """Run reaper loop"""
-    print("🧹 Reservation reaper started")
+    print("Reservation reaper started")
     
     while True:
         try:
             await reap_expired_reservations()
         except Exception as e:
-            print(f"✗ Reaper error: {e}")
+            print(f"Reaper error: {e}")
         
-        await asyncio.sleep(30)  # Run every 30 seconds
+        await asyncio.sleep(30)  #Run every 30 seconds
 
 if __name__ == "__main__":
     asyncio.run(reap_expired_reservations())

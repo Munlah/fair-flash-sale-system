@@ -53,17 +53,17 @@ services:
       DATABASE_URL: postgresql://flash_user:flash_pass@postgres:5432/flash_db
     depends_on:
       postgres:
-        condition: service_healthy # Wait for postgres to be ready
+        condition: service_healthy 
     ports:
       - "8002:8000"
-    restart: on-failure # Retry if startup fails
+    restart: on-failure #Retry if startup fails
 
   payment-gateway:
     build:
       context: ./services/payment-gateway
     container_name: payment-gateway
     environment:
-      PAYMENT_FAILURE_RATE: ${PAYMENT_FAILURE_RATE:-0.1}
+      PAYMENT_FAILURE_RATE: ${PAYMENT_FAILURE_RATE:-0.3}
       PAYMENT_TIMEOUT_RATE: ${PAYMENT_TIMEOUT_RATE:-0.0}
       PAYMENT_MIN_DELAY: ${PAYMENT_MIN_DELAY:-0.5}
       PAYMENT_MAX_DELAY: ${PAYMENT_MAX_DELAY:-2.0}
