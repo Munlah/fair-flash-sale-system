@@ -26,6 +26,9 @@ async def reap_expired_reservations():
 
         for reservation_id in expired:
             reservation_key = f"reservation:{reservation_id}"
+            if await client.get(f"committed:{reservation_id}"):
+                await client.zrem("reservation_expirations", reservation_id)
+                continue
             reservation = await client.hgetall(reservation_key)
             product_id = reservation.get("product_id") or await client.get(
                 f"reservation-product:{reservation_id}"

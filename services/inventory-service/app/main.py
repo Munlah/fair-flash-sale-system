@@ -111,6 +111,16 @@ def release(reservation_id: str):
     return {"success": True, "released_product": product}
 
 
+@app.post("/commit/{reservation_id}")
+def commit(reservation_id: str):
+    """Mark a reservation as consumed by a completed order so the reaper never returns its stock."""
+    redis_client.setex(f"committed:{reservation_id}", 7 * 24 * 3600, "1")
+    redis_client.delete(f"reservation:{reservation_id}")
+    redis_client.delete(f"reservation-product:{reservation_id}")
+    redis_client.zrem("reservation_expirations", reservation_id)
+    return {"success": True}
+
+
 @app.get("/stock/{product_id}")
 def get_stock(product_id: str):
     stock = redis_client.get(f"stock:{product_id}")

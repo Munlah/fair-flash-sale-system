@@ -370,8 +370,10 @@ async def purchase(token: str):
             await redis_async(
                 redis_client.hset,
                 f"token:{token}",
-                "status",
-                "pending_verification"
+                mapping={
+                    "status": "pending_verification",
+                    "pending_since": str(time.time()),
+                },
             )
             return PurchaseResponse(
                 success=False,
@@ -392,8 +394,10 @@ async def purchase(token: str):
         await redis_async(
             redis_client.hset,
             f"token:{token}",
-            "status",
-            "pending_verification"
+            mapping={
+                "status": "pending_verification",
+                "pending_since": str(time.time()),
+            },
         )
         return PurchaseResponse(
             success=False,
@@ -439,6 +443,15 @@ async def purchase(token: str):
         )
     
     #Success
+    if reservation_id:
+        for _attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    commit = await client.post(f"{INVENTORY_URL}/commit/{reservation_id}")
+                    if commit.status_code == 200:
+                        break
+            except Exception:
+                await asyncio.sleep(0.2)
     await redis_async(redis_client.hset, f"token:{token}", "status", "completed")
     user_product_key = f"active_token:{user_id}:{product_id}"
     await redis_async(redis_client.delete, user_product_key)

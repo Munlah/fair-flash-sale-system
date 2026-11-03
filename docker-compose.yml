@@ -21,8 +21,11 @@ services:
   redis:
     image: redis:7
     container_name: dffs-redis
+    command: ["redis-server", "--appendonly", "yes", "--dir", "/data"]
     ports:
       - "6379:6379"
+    volumes:
+      - redis_data:/data
     healthcheck:
       test: [ "CMD", "redis-cli", "ping" ]
       interval: 5s
@@ -121,3 +124,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

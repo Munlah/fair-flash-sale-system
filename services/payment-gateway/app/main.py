@@ -11,6 +11,7 @@ Simulates realistic payment gateway behavior including:
 """
 
 import os
+import asyncio
 import random
 import time
 import uuid
@@ -74,19 +75,19 @@ async def charge(request: ChargeRequest):
     """
     
     #Check if payment already exists(idempotency)
-    if request.idempotency_key in payments:
-        existing = payments[request.idempotency_key]
+    existing = payments.get(request.idempotency_key)
+    if existing and existing["status"] == "succeeded":
         return ChargeResponse(**existing)
     
     #Simulate network delay
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
-    time.sleep(delay)
+    await asyncio.sleep(delay)
     
     #Simulate timeout(gateway doesn't respond)
     if random.random() < TIMEOUT_RATE:
         #In reality this would hang, but we'll raise 503
         #The gateway will timeout waiting and not know the result
-        time.sleep(5)  # Extra delay before timeout
+        await asyncio.sleep(5)  # Extra delay before timeout
         raise HTTPException(status_code=503, detail="Gateway timeout")
     
     #Simulate random failures
@@ -99,7 +100,6 @@ async def charge(request: ChargeRequest):
             "user_id": request.user_id,
             "reason": "insufficient_funds"  #or card_declined, etc.
         }
-        payments[request.idempotency_key] = payment_record
         return ChargeResponse(**payment_record)
     
     #Success, record payment

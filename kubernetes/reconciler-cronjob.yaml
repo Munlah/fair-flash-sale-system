@@ -28,4 +28,6 @@ spec:
               value: "http://checkout:8000"
             - name: INVENTORY_URL
               value: "http://inventory:8000"
+            - name: PENDING_TIMEOUT_SECONDS
+              value: "240"
           restartPolicy: OnFailure

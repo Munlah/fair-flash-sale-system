@@ -4,6 +4,7 @@ Queries payment gateway to confirm if charge succeeded
 """
 import asyncio
 import os
+import time
 import httpx
 import redis.asyncio as redis
 
@@ -12,6 +13,29 @@ REDIS_PORT = 6379
 PAYMENT_URL = os.getenv("PAYMENT_URL", "http://payment-gateway:8000")
 CHECKOUT_URL = os.getenv("CHECKOUT_URL", "http://checkout:8000")
 INVENTORY_URL = os.getenv("INVENTORY_URL", "http://inventory:8000")
+PENDING_TIMEOUT_SECONDS = int(os.getenv("PENDING_TIMEOUT_SECONDS", "240"))
+
+
+async def release_expired_pending(client, http_client, token, token_data):
+    pending_since = float(token_data.get("pending_since", "0") or 0)
+    if not pending_since:
+        await client.hset(f"token:{token}", "pending_since", str(time.time()))
+        return False
+    if time.time() - pending_since < PENDING_TIMEOUT_SECONDS:
+        return False
+
+    reservation_id = token_data.get("reservation_id")
+    if reservation_id:
+        release_resp = await http_client.post(
+            f"{INVENTORY_URL}/release/{reservation_id}"
+        )
+        release_resp.raise_for_status()
+    await client.hset(f"token:{token}", mapping={
+        "status": "admitted",
+        "pending_since": "",
+    })
+    print(f"⚠ Payment status unavailable for {token}; reservation released")
+    return True
 
 async def reconcile_pending_transactions():
     """Find and verify pending_verification transactions"""
@@ -28,7 +52,7 @@ async def reconcile_pending_transactions():
                 token_data = await client.hgetall(key)
                 status = token_data.get("status")
                 
-                if status == "pending_verification":
+                if status in {"pending_verification", "manual_review"}:
                     token = key.split(":", 1)[1]
                     user_id = token_data.get("user_id")
                     product_id = token_data.get("product_id")
@@ -38,12 +62,24 @@ async def reconcile_pending_transactions():
                     #Check payment status
                     async with httpx.AsyncClient(timeout=5.0) as http_client:
                         try:
-                            payment_resp = await http_client.get(
-                                f"{PAYMENT_URL}/status/{token}"
-                            )
+                            if status == "manual_review":
+                                payment_resp = None
+                                payment_data = {"status": "succeeded"}
+                            else:
+                                payment_resp = await http_client.get(
+                                    f"{PAYMENT_URL}/status/{token}"
+                                )
                             
-                            if payment_resp.status_code == 200:
-                                payment_data = payment_resp.json()
+                            if payment_resp is not None and payment_resp.status_code == 404:
+                                if status == "pending_verification":
+                                    await release_expired_pending(
+                                        client, http_client, token, token_data
+                                    )
+                                continue
+
+                            if payment_resp is None or payment_resp.status_code == 200:
+                                if payment_resp is not None:
+                                    payment_data = payment_resp.json()
                                 
                                 if payment_data.get("status") == "succeeded":
                                     #Payment succeeded - complete the order
@@ -64,7 +100,15 @@ async def reconcile_pending_transactions():
                                     )
                                     
                                     if order_resp.status_code == 200:
+                                        if reservation_id:
+                                            commit_resp = await http_client.post(
+                                                f"{INVENTORY_URL}/commit/{reservation_id}"
+                                            )
+                                            commit_resp.raise_for_status()
                                         await client.hset(f"token:{token}", "status", "completed")
+                                        await client.delete(
+                                            f"active_token:{user_id}:{product_id}"
+                                        )
                                         reconciled_count += 1
                                         print(f"✓ Order completed for {token}")
                                 
