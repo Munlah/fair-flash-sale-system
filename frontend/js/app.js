@@ -1,15 +1,14 @@
-//The browser talks to the gateway for queue and purchase actions.
+//the browser talks to the gateway for queue and purchase actions.
 const API_BASES = ['http://localhost:8005', 'http://localhost:8000'];
 let API_BASE = API_BASES[0];
 
-//Keep tokens in browser storage so a page refresh does not lose the user's queue view.
+//keep tokens in browser storage so a page refresh does not lose the user's queue view.
 let tokens = [];
 let statusCheckInterval = null;
 let previousSnapshot = null;
 let dashboardErrorLogged = false;
 
-//Pick the gateway that is actually available. Compose uses 8005 and a
-//Kubernetes port-forward normally uses 8000.
+//pick the gateway that is actually available. Compose uses 8005 and a kubernetes port-forward normally uses 8000.
 async function getGatewayBase() {
     for (const candidate of API_BASES) {
         try {
@@ -22,7 +21,7 @@ async function getGatewayBase() {
                 return API_BASE;
             }
         } catch {
-            //Try the next supported local gateway address.
+            //try the next supported local gateway address.
         }
     }
     throw new Error('Gateway is not available on ports 8000 or 8005');
@@ -35,7 +34,7 @@ function isValidToken(token) {
         && token !== 'null';
 }
 
-//Start the dashboard refreshers when the page is ready.
+//start the dashboard refreshers when the page is ready.
 window.onload = () => {
     loadTokensFromStorage();
     refreshStats();
@@ -71,7 +70,7 @@ function saveTokensToStorage() {
     localStorage.setItem('flashSaleTokens', JSON.stringify(tokens));
 }
 
-//Add a short message to the activity log and keep the newest 50 messages.
+//add a short message to the activity log and keep the newest 50 messages.
 function log(message, type = 'info') {
     const logDiv = document.getElementById('activityLog');
     const entry = document.createElement('div');
@@ -90,7 +89,7 @@ function log(message, type = 'info') {
     }
 }
 
-//Load current stock and queue size for the dashboard.
+//load current stock and queue size for the dashboard.
 async function refreshStats() {
     try {
         const gateway = await getGatewayBase();
@@ -179,7 +178,7 @@ function renderServiceHealth(services) {
     }).join('');
 }
 
-//Submit a new customer to the gateway waiting room.
+//submit a new customer to the gateway waiting room.
 async function joinQueue() {
     const userId = document.getElementById('userId').value;
     const productId = document.getElementById('productId').value;
@@ -259,7 +258,7 @@ async function joinQueue() {
     }
 }
 
-//Check each token regularly so admitted users can complete their purchase.
+//check each token regularly so admitted users can complete their purchase.
 function startStatusCheckLoop() {
     if (statusCheckInterval) {
         clearInterval(statusCheckInterval);
@@ -286,7 +285,7 @@ async function checkAllStatuses() {
             const gateway = await getGatewayBase();
             const response = await fetch(`${gateway}/queue/status/${tokenObj.token}`);
             
-            //If token not found (404), remove it from local storage
+            //if token not found (404), remove it from local storage
             if (response.status === 404) {
                 console.log(`Token ${tokenObj.token.substring(0, 8)} not found, removing from list`);
                 tokens = tokens.filter(t => t.token !== tokenObj.token);
@@ -306,7 +305,7 @@ async function checkAllStatuses() {
                 tokenObj.position = data.position;
 
                 if (data.status === 'admitted') {
-                    log(`✓ Token ${tokenObj.token.substring(0, 8)}... admitted!`, 'success');
+                    log(`Token ${tokenObj.token.substring(0, 8)}... admitted!`, 'success');
                 }
 
                 saveTokensToStorage();
@@ -318,7 +317,7 @@ async function checkAllStatuses() {
     }
 }
 
-//Ask the gateway to reserve stock and create an order for an admitted token.
+//ask the gateway to reserve stock and create an order for an admitted token.
 async function purchase(token) {
     if (!isValidToken(token)) {
         log('Invalid token', 'error');
@@ -382,7 +381,7 @@ function clearAllTokens() {
     }
 }
 
-//Render tokens in a stable order: admitted, waiting, then completed.
+//render tokens in a stable order: admitted, waiting, then completed.
 function renderTokenList() {
     const listDiv = document.getElementById('tokenList');
 
@@ -434,7 +433,7 @@ function renderTokenList() {
                 <div class="button-group">
                     <button class="small secondary" onclick="removeToken('${t.token}')">Remove</button>
                 </div>
-                <p class="purchase-result">✓ Order ID: ${t.orderId}</p>`;
+                <p class="purchase-result">Order ID: ${t.orderId}</p>`;
         } else {
             buttons = `
                 <div class="button-group">
@@ -458,7 +457,7 @@ function renderTokenList() {
     }).filter(html => html !== '').join('');
 }
 
-//Set the demo product stock through the inventory service.
+//set the demo product stock through the inventory service.
 async function setStock() {
     const amount = document.getElementById('stockAmount').value;
 

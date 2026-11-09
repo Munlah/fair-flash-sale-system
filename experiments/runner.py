@@ -1,8 +1,4 @@
-"""Compare admission modes with the latency-group Locust test.
-Each run resets the demo data, runs Locust, checks that the database and
-inventory still agree, and writes CSV/graph files to experiments/results.
-This is an experiment script, not a unit-test runner.
-"""
+"""Runs Locust latency tests across admission modes, validates inventory against the DB, and saves output files to experiments/results/. It resets state between runs and is meant for experimental benchmarking, not unit testing."""
 
 import asyncio
 import argparse
@@ -55,7 +51,7 @@ class ExperimentRunner:
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
     async def reset_system(self):
-        """Clear test state and put a known amount of stock back in Redis."""
+        """clear test state and put a known amount of stock back in Redis."""
         self.redis_client.flushall()
         conn = await asyncpg.connect(POSTGRES_DSN)
         try:
@@ -69,7 +65,7 @@ class ExperimentRunner:
             response.raise_for_status()
 
     def restart_admission_service(self, mode):
-        """Restart only the admission service so its mode setting is applied."""
+        """restart only the admission service so its mode setting is applied."""
         subprocess.run(
             ["docker", "compose", "up", "-d", "--force-recreate", "admission-service"],
             check=True,
@@ -79,7 +75,7 @@ class ExperimentRunner:
         time.sleep(5)
 
     def restart_payment_service(self):
-        """Use a lower failure rate for repeatable automated experiments."""
+        """use a lower failure rate for repeatable automated experiments."""
         subprocess.run(
             ["docker", "compose", "up", "-d", "--force-recreate", "payment-gateway"],
             check=True,
@@ -89,7 +85,7 @@ class ExperimentRunner:
         time.sleep(5)
 
     def run_locust(self, mode):
-        """Run the selected Locust scenario and read its CSV summary."""
+        """run the selected Locust scenario and read its CSV summary."""
         csv_prefix = OUTPUT_DIR / f"locust_{mode}_{self.timestamp}"
         command = [
             "locust",
@@ -114,7 +110,7 @@ class ExperimentRunner:
 
     @staticmethod
     def parse_locust_stats(stats_path, mode):
-        """Convert Locust's group rows into the metrics used by the report."""
+        """convert Locust's group rows into the metrics used by the report."""
         metrics = {"mode": mode, "groups": {}}
         with stats_path.open(newline="", encoding="utf-8") as stats_file:
             for row in csv.DictReader(stats_file):
@@ -138,7 +134,7 @@ class ExperimentRunner:
         return metrics
 
     async def check_integrity(self):
-        """Check that stock, orders, and idempotency keys remain consistent."""
+        """check that stock, orders, and idempotency keys remain consistent."""
         async with httpx.AsyncClient() as client:
             stock_response = await client.get(f"{INVENTORY_URL}/stock/phone")
             stock_response.raise_for_status()
@@ -158,13 +154,13 @@ class ExperimentRunner:
 
     @staticmethod
     def jain_index(values):
-        """Return a simple 0..1 fairness score for the latency groups."""
+        """return a simple 0..1 fairness score for the latency groups."""
         if not values or sum(value * value for value in values) == 0:
             return 0.0
         return sum(values) ** 2 / (len(values) * sum(value * value for value in values))
 
     async def run_mode(self, mode):
-        """Run one admission mode from reset through integrity verification."""
+        """run one admission mode from reset through integrity verification."""
         await self.reset_system()
         self.restart_admission_service(mode)
         metrics = self.run_locust(mode)
@@ -194,13 +190,13 @@ class ExperimentRunner:
         })
 
     def save_results(self):
-        """Save one compact CSV row for every mode."""
+        """save one compact CSV row for every mode."""
         output = OUTPUT_DIR / f"results_{self.timestamp}.csv"
         pd.DataFrame(self.results).to_csv(output, index=False)
         return output
 
     def generate_graphs(self):
-        """Create the two charts used in the report and presentation."""
+        """create the two charts used in the report and presentation."""
         if not self.results:
             return
         import matplotlib.pyplot as plt
@@ -237,7 +233,7 @@ class ExperimentRunner:
 
 
 async def check_prerequisites():
-    """Fail early with a useful message when the local services are absent."""
+    """fail early with a useful message when the local services are absent."""
     try:
         async with httpx.AsyncClient(timeout=3) as client:
             response = await client.get(f"{GATEWAY_URL}/health")
@@ -256,7 +252,7 @@ async def check_prerequisites():
 
 
 def parse_args():
-    """Read the small set of options useful during a classroom/demo run."""
+    """read the small set of options useful during a classroom/demo run."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--modes", nargs="+", choices=MODES, default=list(MODES))
     parser.add_argument("--users", type=int, default=None, help="Locust user count")

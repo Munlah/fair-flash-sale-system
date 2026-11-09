@@ -1,14 +1,4 @@
-"""Small mock payment provider used by the demo and load tests.
-Payments are intentionally in memory. That keeps the demo simple, but it also
-means a payment pod restart clears its local payment records.
-Payment Gateway Service - Mock payment processor
-==========================================================================
-Simulates realistic payment gateway behavior including:
-- Network delays
-- Random timeouts and failures
-- Idempotent charge processing
-- Payment status verification
-"""
+"""simple in-memory mock payment provider used across the demo and load tests. keeping everything in memory makes local setup easy, but keep in mind that restarting the pod clears out the history. it handles the usual mock gateway quirks: random failures, network delays, idempotency keys, and payment status checks."""
 
 import os
 import asyncio
@@ -31,10 +21,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#In-memory payment storage (Redis would be used in production)
+#in-memory payment storage (Redis would be used in production)
 payments: Dict[str, dict] = {}
 
-#Configuration
+#configuration
 FAILURE_RATE = float(os.getenv("PAYMENT_FAILURE_RATE", "0.3"))  #30% for the demo
 TIMEOUT_RATE = float(os.getenv("PAYMENT_TIMEOUT_RATE", "0.05"))  #5% by default
 MIN_DELAY = float(os.getenv("PAYMENT_MIN_DELAY", "0.5"))
@@ -69,28 +59,25 @@ async def health():
 
 @app.post("/charge", response_model=ChargeResponse)
 async def charge(request: ChargeRequest):
-    """
-    Process a payment charge with realistic failure scenarios
-    Idempotent: Same idempotency_key returns the same result
-    """
+    """process a payment charge with realistic failure scenarios. idempotent: Same idempotency_key returns the same result"""
     
-    #Check if payment already exists(idempotency)
+    #check if payment already exists(idempotency)
     existing = payments.get(request.idempotency_key)
     if existing and existing["status"] == "succeeded":
         return ChargeResponse(**existing)
     
-    #Simulate network delay
+    #simulate network delay
     delay = random.uniform(MIN_DELAY, MAX_DELAY)
     await asyncio.sleep(delay)
     
-    #Simulate timeout(gateway doesn't respond)
+    #simulate timeout(gateway doesn't respond)
     if random.random() < TIMEOUT_RATE:
-        #In reality this would hang, but we'll raise 503
-        #The gateway will timeout waiting and not know the result
-        await asyncio.sleep(5)  # Extra delay before timeout
+        #in reality this would hang, but we'll raise 503
+        #the gateway will timeout waiting and not know the result
+        await asyncio.sleep(5)  #extra delay before timeout
         raise HTTPException(status_code=503, detail="Gateway timeout")
     
-    #Simulate random failures
+    #simulate random failures
     if random.random() < FAILURE_RATE:
         payment_id = f"pay_{uuid.uuid4().hex[:16]}"
         payment_record = {
@@ -102,7 +89,7 @@ async def charge(request: ChargeRequest):
         }
         return ChargeResponse(**payment_record)
     
-    #Success, record payment
+    #success, record payment
     payment_id = f"pay_{uuid.uuid4().hex[:16]}"
     payment_record = {
         "payment_id": payment_id,
@@ -117,11 +104,7 @@ async def charge(request: ChargeRequest):
 
 @app.get("/status/{idempotency_key}", response_model=ChargeResponse)
 async def get_payment_status(idempotency_key: str):
-    """
-    Check payment status by idempotency key
-    
-    Used for verification after timeouts
-    """
+    """check payment status by idempotency key, used for verification after timeouts"""
     if idempotency_key not in payments:
         raise HTTPException(status_code=404, detail="Payment not found")
     
@@ -131,7 +114,7 @@ async def get_payment_status(idempotency_key: str):
 
 @app.get("/stats")
 async def get_stats():
-    """Get payment statistics"""
+    """get payment statistics"""
     total = len(payments)
     succeeded = sum(1 for p in payments.values() if p["status"] == "succeeded")
     failed = sum(1 for p in payments.values() if p["status"] == "failed")
@@ -146,6 +129,6 @@ async def get_stats():
 
 @app.delete("/reset")
 async def reset_payments():
-    """Reset all payments (for testing)"""
+    """reset all payments (for testing)"""
     payments.clear()
     return {"message": "All payments cleared"}

@@ -1,7 +1,4 @@
-"""
-Gateway Service - Entry point for all user requests
-==========================================================================
-"""
+"""gateway Service: Entry point for all user requests"""
 
 import asyncio
 import os
@@ -16,9 +13,7 @@ from pydantic import BaseModel
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor
 
-# ==========================================================================
-# Configuration
-# ==========================================================================
+#configuration
 
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = 6379
@@ -30,13 +25,11 @@ ADMISSION_URL = os.getenv("ADMISSION_URL", "http://admission:8000")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ==========================================================================
-# Initialize FastAPI app
-# ==========================================================================
+#initialize FastAPI app
 
 app = FastAPI(title="Gateway Service", version="1.0.0")
 
-#Enable CORS
+#enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -45,9 +38,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================================================================
-# Redis Client
-# ==========================================================================
+#redis client
 
 redis_client = redis.Redis(
     host=REDIS_HOST,
@@ -61,13 +52,11 @@ TOKEN_TTL_SECONDS = 600
 executor = ThreadPoolExecutor(max_workers=10)
 
 async def redis_async(func, *args, **kwargs):
-    """Helper to run sync Redis commands in thread pool"""
+    """helper to run sync Redis commands in thread pool"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, lambda: func(*args, **kwargs))
 
-# ==========================================================================
-# Data Models
-# ==========================================================================
+#data models
 
 class QueueJoinResponse(BaseModel):
     token: str
@@ -85,13 +74,11 @@ class PurchaseResponse(BaseModel):
 
 
 
-# ==========================================================================
-# Endpoints
-# ==========================================================================
+#endpoints
 
 @app.get("/health")
 async def health():
-    """Health check"""
+    """health check"""
     try:
         await redis_async(redis_client.ping)
         return {"status": "healthy", "service": "gateway", "redis": "connected"}
@@ -100,7 +87,7 @@ async def health():
 
 
 async def fetch_service_health(client, name, url):
-    """Return a normalized health result without hiding an unavailable service."""
+    """return a normalized health result without hiding an unavailable service."""
     try:
         response = await client.get(f"{url}/health")
         response.raise_for_status()
@@ -122,7 +109,7 @@ async def fetch_service_health(client, name, url):
 
 @app.get("/dashboard/snapshot")
 async def dashboard_snapshot(product_id: str = "phone"):
-    """Collect the live values needed by the demonstration dashboard."""
+    """collect the live values needed by the demonstration dashboard."""
     async with httpx.AsyncClient(timeout=2.0) as client:
         health_results = await asyncio.gather(
             fetch_service_health(client, "gateway", "http://localhost:8000"),
@@ -178,12 +165,10 @@ async def dashboard_snapshot(product_id: str = "phone"):
 
 @app.post("/queue/join", response_model=QueueJoinResponse)
 async def join_queue(user_id: str, product_id: str):
-    """
-    Add user to queue with spam prevention using an atomic SET NX.
-    """
+    """add user to queue with spam prevention using an atomic SET NX."""
     user_product_key = f"active_token:{user_id}:{product_id}"
     
-    #Check stock before joining queue
+    #check stock before joining queue
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{INVENTORY_URL}/stock/{product_id}")
@@ -196,10 +181,10 @@ async def join_queue(user_id: str, product_id: str):
     except ValueError:
         logger.warning(f"Could not check stock for %s; allowing queue join: %s", product_id)
     
-    #Generate token
+    #generate token
     token = str(uuid.uuid4())
     
-    #Atomic check: ensure user doesn't already have a token for this product
+    #atomic check: ensure user doesn't already have a token for this product
     token_claimed = await redis_async(
         redis_client.set,
         user_product_key,
@@ -226,7 +211,7 @@ async def join_queue(user_id: str, product_id: str):
             position=position if position is not None else 0
         )
     
-    #Store token data
+    #store token data
     arrival_ms = int(time.time() * 1000)
     
     pipe = redis_client.pipeline()
@@ -250,7 +235,7 @@ async def join_queue(user_id: str, product_id: str):
 
 @app.get("/queue/status/{token}", response_model=TokenStatusResponse)
 async def check_status(token: str):
-    """Check token status"""
+    """check token status"""
     data = await redis_async(redis_client.hgetall, f"token:{token}")
     
     if not data:
@@ -268,9 +253,7 @@ async def check_status(token: str):
 
 @app.post("/purchase", response_model=PurchaseResponse)
 async def purchase(token: str):
-    """
-    Complete purchase with payment gateway integration and fault tolerance
-    """
+    """complete purchase with payment gateway integration and fault tolerance"""
     token_data = await redis_async(redis_client.hgetall, f"token:{token}")
     
     if not token_data:
@@ -278,7 +261,7 @@ async def purchase(token: str):
     
     status = token_data.get("status")
     
-    #Check if already completed
+    #check if already completed
     if status == "completed":
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
@@ -292,7 +275,7 @@ async def purchase(token: str):
     if status != "admitted":
         return PurchaseResponse(success=False, reason=f"Token not admitted (status: {status})")
     
-    #Atomic transition to "processing"
+    #atomic transition to "processing"
     lua_script = """
     local token_key = KEYS[1]
     local current_status = redis.call('HGET', token_key, 'status')
@@ -318,7 +301,7 @@ async def purchase(token: str):
     product_id = token_data.get("product_id", "phone")
     reservation_id = None
     
-    #Reserve stock
+    #reserve stock
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.post(f"{INVENTORY_URL}/reserve/{product_id}")
@@ -416,7 +399,7 @@ async def purchase(token: str):
         await redis_async(redis_client.hset, f"token:{token}", "status", "admitted")
         return PurchaseResponse(success=False, reason=f"Payment error: {exc}")
     
-    # Create order
+    #create order
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             order_response = await client.post(
@@ -442,7 +425,7 @@ async def purchase(token: str):
             reason=f"Order creation failed: {exc}",
         )
     
-    #Success
+    #success
     if reservation_id:
         for _attempt in range(3):
             try:
@@ -461,7 +444,7 @@ async def purchase(token: str):
 
 @app.get("/stock/{product_id}")
 async def get_stock(product_id: str):
-    """Proxy to inventory service"""
+    """proxy to inventory service"""
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             response = await client.get(f"{INVENTORY_URL}/stock/{product_id}")
@@ -473,7 +456,7 @@ async def get_stock(product_id: str):
 
 @app.post("/stock/{product_id}/{quantity}")
 async def set_stock(product_id: str, quantity: int):
-    """Proxy the demo stock control through the same public gateway."""
+    """proxy the demo stock control through the same public gateway."""
     if quantity < 0:
         raise HTTPException(status_code=400, detail="Stock cannot be negative")
 

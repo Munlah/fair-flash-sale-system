@@ -3,14 +3,14 @@
 ## Setup (Before Demo)
 
 ```bash
-#Start all services
+#start all services
 docker compose up -d
 
-#Open logs in separate terminal
+#open logs in separate terminal
 docker compose logs -f admission-service
 
-#Open demo UI
+#open demo UI
 start http://localhost:5500/
 
-#Set stock
+#set stock
 curl -X POST http://localhost:8001/stock/phone/50

@@ -1,8 +1,4 @@
-"""Admission controller for the flash-sale waiting room.
-The service reads waiting tokens from Redis and moves a limited number to
-``admitted`` on every tick. The windowed mode shuffles users inside a closed
-time window while keeping older windows ahead of newer ones.
-"""
+"""Admission controller for managing waiting room tokens in Redis. It periodically admits a batch of waiting users. When running in windowed mode, it groups users into small time buckets and shuffles each bucket—giving older cohorts priority while neutralizing ping advantages within the same window."""
 
 import asyncio
 import os
@@ -16,7 +12,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from leader_election import run_with_leader_election
 
-#The controller and gateway share this Redis instance.
+#the controller and gateway share this Redis instance.
 redis_client = redis.Redis(
     host=os.getenv("REDIS_HOST", "localhost"),
     port=6379,
@@ -42,7 +38,7 @@ print(
 
 
 async def get_capacity(product_id: str) -> int:
-    """Use current stock to limit how many users can be admitted."""
+    """use current stock to limit how many users can be admitted."""
     try:
         async with httpx.AsyncClient(timeout=2) as client:
             resp = await client.get(f"{INVENTORY_URL}/stock/{product_id}")
@@ -59,7 +55,7 @@ async def get_capacity(product_id: str) -> int:
 
 
 def update_token_status(product_id: str, token: str) -> bool:
-    """Remove a token from the queue and mark it admitted atomically."""
+    """remove a token from the queue and mark it admitted atomically."""
     pipe = redis_client.pipeline()
     pipe.zrem(f"queue:{product_id}", token)
     pipe.hset(f"token:{token}", "status", "admitted")
@@ -68,7 +64,7 @@ def update_token_status(product_id: str, token: str) -> bool:
 
 
 def admit_batch_windowed(product_id: str, capacity: int) -> int:
-    """Admit a deterministic random selection from each closed time window."""
+    """admit a deterministic random selection from each closed time window."""
     if capacity <= 0:
         return 0
 
@@ -105,7 +101,7 @@ def admit_batch_windowed(product_id: str, capacity: int) -> int:
                 break
             if update_token_status(product_id, token):
                 admitted += 1
-                print(f"✓ [WINDOWED] Admitted token {token[:8]}... from window {w_start}")
+                print(f"[WINDOWED] Admitted token {token[:8]}... from window {w_start}")
 
     if admitted > 0:
         print(f"=== Admitted {admitted} tokens for {product_id} ===")
@@ -114,7 +110,7 @@ def admit_batch_windowed(product_id: str, capacity: int) -> int:
 
 
 def admit_batch_fifo(product_id: str, capacity: int) -> int:
-    """Admit the oldest waiting tokens first."""
+    """admit the oldest waiting tokens first."""
     if capacity <= 0:
         return 0
 
@@ -129,7 +125,7 @@ def admit_batch_fifo(product_id: str, capacity: int) -> int:
 
 
 def admit_batch_random(product_id: str, capacity: int) -> int:
-    """Admit a random sample of waiting tokens."""
+    """admit a random sample of waiting tokens."""
     if capacity <= 0:
         return 0
 
@@ -145,7 +141,7 @@ def admit_batch_random(product_id: str, capacity: int) -> int:
 
 
 def admit_batch_none(product_id: str, capacity: int) -> int:
-    """Admit every waiting token without rate limiting."""
+    """admit every waiting token without rate limiting."""
     waiting = redis_client.zrange(f"queue:{product_id}", 0, -1)
     admitted = sum(
         update_token_status(product_id, token)
@@ -165,7 +161,7 @@ ADMISSION_FUNCTIONS = {
 
 
 async def admission_loop_iteration():
-    """Single iteration of the admission loop (called by leader election)"""
+    """single iteration of the admission loop (called by leader election)"""
     for product_id in TRACKED_PRODUCTS:
         queue_size = redis_client.zcard(f"queue:{product_id}")
         
@@ -180,8 +176,8 @@ async def admission_loop_iteration():
 
 
 async def admission_loop():
-    """Main admission loop with leader election"""
-    print(f"🚀 ADMISSION LOOP STARTED ({ADMISSION_MODE}) WITH LEADER ELECTION 🚀")
+    """main admission loop with leader election"""
+    print(f"ADMISSION LOOP STARTED ({ADMISSION_MODE}) WITH LEADER ELECTION")
     
     #Run admission loop with leader election
     await run_with_leader_election(admission_loop_iteration)
@@ -200,12 +196,12 @@ async def lifespan(app: FastAPI):
     
     try:
         redis_client.ping()
-        print("✓ Redis connected")
+        print("Redis connected")
     except Exception as e:
-        print(f"✗ Redis connection failed: {e}")
+        print(f"Redis connection failed: {e}")
     
     admission_task = asyncio.create_task(admission_loop())
-    print("✓ Background task started with leader election")
+    print("Background task started with leader election")
     
     yield
     
@@ -216,7 +212,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Admission Controller", lifespan=lifespan)
 
-#The browser dashboard calls this service for queue statistics.
+#the browser dashboard calls this service for queue statistics.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -228,7 +224,7 @@ app.add_middleware(
 
 @app.get("/health")
 def health():
-    """Report whether the controller can reach Redis."""
+    """report whether the controller can reach Redis."""
     try:
         redis_client.ping()
         return {
@@ -247,14 +243,14 @@ def health():
 
 @app.get("/queue/{product_id}/length")
 def queue_length(product_id: str):
-    """Return the number of users still waiting for a product."""
+    """return the number of users still waiting for a product."""
     count = redis_client.zcard(f"queue:{product_id}")
     return {"product_id": product_id, "waiting": count, "mode": ADMISSION_MODE}
 
 
 @app.get("/mode")
 def get_mode():
-    """Return the active admission strategy."""
+    """return the active admission strategy."""
     return {
         "mode": ADMISSION_MODE,
         "available_modes": sorted(SUPPORTED_MODES),

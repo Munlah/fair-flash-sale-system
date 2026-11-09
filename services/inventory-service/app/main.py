@@ -1,10 +1,4 @@
-#Inventory & Reservation Service
-# --------------------------------
-# Reserves a unit of stock as a single atomic Redis operation (Lua script),
-# so concurrent requests can never both succeed for the last item. Each
-# reservation is backed by a short-lived key; if checkout never completes,
-# the reservation key expires and the unit must be explicitly released back
-# to the pool via /release (called by the Gateway on a failed checkout).
+#handles atomic stock reservations in Redis using a Lua script—so two concurrent requests can never both sneak in and grab the last item. each reservation sits behind a short-lived TTL key. if the checkout fails or never finishes, the key expires (and the gateway also explicitly calls /release to push the unit right back into the pool).
 
 import os
 import time
@@ -32,7 +26,7 @@ redis_client = redis.Redis(
 
 RESERVATION_TIMEOUT = int(os.getenv("RESERVATION_TIMEOUT", "300"))  #seconds
 
-#Atomic: check stock -> decrement -> record reservation, all in one Redis call.
+#atomic: check stock -> decrement -> record reservation, all in one Redis call.
 RESERVE_SCRIPT = """
 local stock = redis.call('GET', KEYS[1])
 
@@ -113,7 +107,7 @@ def release(reservation_id: str):
 
 @app.post("/commit/{reservation_id}")
 def commit(reservation_id: str):
-    """Mark a reservation as consumed by a completed order so the reaper never returns its stock."""
+    """mark a reservation as consumed by a completed order so the reaper never returns its stock."""
     redis_client.setex(f"committed:{reservation_id}", 7 * 24 * 3600, "1")
     redis_client.delete(f"reservation:{reservation_id}")
     redis_client.delete(f"reservation-product:{reservation_id}")

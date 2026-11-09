@@ -4,3 +4,4 @@ seaborn>=0.13.2
 redis>=5.2.1
 asyncpg>=0.30.0
 httpx>=0.28.1
+requests>=2.32.0

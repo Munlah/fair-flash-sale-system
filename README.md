@@ -15,7 +15,6 @@ The project is designed to demonstrate two things:
 ## What is in the system?
 
 | Service | Local port | Responsibility |
-|---|---:|---|
 | Web UI (Compose/static server) | 5500 | Dashboard and manual demo controls |
 | Gateway | 8005 in Compose, 8000 in Kubernetes port-forward | Public API and purchase orchestration |
 | Inventory | 8001 | Atomic reservations and stock |
@@ -270,6 +269,30 @@ It is a smoke and resilience suite, not a full production test. A passing
 run means the main demo paths work in the current environment; it does not
 prove PostgreSQL failover, network partitions, or long-term payment
 reconciliation.
+
+## Failure-injection experiment for the article
+
+The failure-injection experiment measures recovery time, client-visible system
+errors, and the stock invariant while deleting gateway, inventory, checkout,
+payment, or admission-leader pods. Run it against a disposable Kubernetes
+cluster through a stable NodePort or Minikube service URL. Do not use
+`kubectl port-forward`, because it is pinned to one pod.
+
+```powershell
+minikube service gateway -n dffs --url
+python .\experiments\failure_injection.py `
+  --gateway-url http://127.0.0.1:XXXXX `
+  --repeats 5 `
+  --scenarios gateway,inventory,checkout,admission-leader
+```
+
+Use `--repeats 1 --scenarios gateway` for a smoke test. The experiment writes
+one CSV of raw runs and one Markdown summary to `experiments/results/`.
+`invariant_holds` verifies:
+
+```text
+stock_start + held_start = stock_end + held_end + new_orders
+```
 
 ## Admission modes
 

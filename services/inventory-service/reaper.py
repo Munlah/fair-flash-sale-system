@@ -1,7 +1,4 @@
-"""
-Reservation Reaper - Cleans up expired reservations
-Runs every 30 seconds to find reservations past their TTL and releases them
-"""
+"""reservation Reaper: cleans up expired reservations. runs every 30 seconds to find reservations past their TTL and releases them."""
 import asyncio
 import os
 import time
@@ -59,7 +56,7 @@ async def reap_expired_reservations():
         await client.aclose()
 
 async def run_reaper():
-    """Run reaper loop"""
+    """run reaper loop"""
     print("Reservation reaper started")
     
     while True:
@@ -68,7 +65,7 @@ async def run_reaper():
         except Exception as e:
             print(f"Reaper error: {e}")
         
-        await asyncio.sleep(30)  #Run every 30 seconds
+        await asyncio.sleep(30)  #run every 30 seconds
 
 if __name__ == "__main__":
     asyncio.run(reap_expired_reservations())

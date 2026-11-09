@@ -1,5 +1,4 @@
-#Digital Flash Sale System - Complete E2E Verification
-#To test all components, fault tolerance, and recovery mechanisms
+#digital Flash Sale System: complete E2E verification to test all components, fault tolerance, and recovery mechanisms
 
 param(
     [int]$ConcurrentUsers = 10,
@@ -11,13 +10,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 Write-Host @"
-
-╔════════════════════════════════════════════════════════════════╗
-║                                                                ║
-║     Digital Flash Sale System - Comprehensive Test Suite      ║
-║                                                                ║
-╚════════════════════════════════════════════════════════════════╝
-
+Digital Flash Sale System - Comprehensive Test Suite
 "@ -ForegroundColor Cyan
 
 if ($PaymentFailureRate -lt 0 -or $PaymentFailureRate -gt 1) {
@@ -34,9 +27,7 @@ if ($LASTEXITCODE -ne 0) {
     throw "Kubernetes payment gateway did not become ready after changing the failure rate."
 }
 
-# =============================================================================
-# Test Configuration
-# =============================================================================
+#test configuration
 
 $TestResults = @{
     Total = 0
@@ -77,9 +68,7 @@ function Test-Component {
     }
 }
 
-# =============================================================================
-# PHASE 1: Infrastructure Health Checks
-# =============================================================================
+#phase 1: infrastructure health checks
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 1: Infrastructure Health Checks" -ForegroundColor Cyan
@@ -124,17 +113,14 @@ Test-Component -Name "Service Endpoints" -Description "Verify all services have 
     return $allGood
 }
 
-# =============================================================================
-# PHASE 2: Individual Service Health
-# =============================================================================
+# phase 2: individual service health
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 2: Individual Service Health" -ForegroundColor Cyan
 Write-Host "="*70 -ForegroundColor Cyan
 
 $services = @{
-    #Use dedicated local ports so Docker Compose services cannot intercept
-    #requests intended for the Kubernetes port-forwards.
+    #use dedicated local ports so Docker Compose services cannot intercept requests intended for the Kubernetes port-forwards.
     "Gateway" = @{Port=18000; Path="/health"; Expected="healthy"}
     "Checkout" = @{Port=18001; Path="/health"; Expected="healthy"}
     "Inventory" = @{Port=18002; Path="/health"; Expected="healthy"}
@@ -172,9 +158,7 @@ foreach ($svcName in $services.Keys) {
     }
 }
 
-# =============================================================================
-# PHASE 3: Queue and Admission System
-# =============================================================================
+#phase 3: queue and admission system
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 3: Queue and Admission System" -ForegroundColor Cyan
@@ -226,7 +210,7 @@ Test-Component -Name "Admission Controller" -Description "Users are being admitt
         $userId = "test-admission-$(Get-Random)"
         $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$Product"
         
-        #Wait up to 15 seconds for admission
+        #wait up to 15 seconds for admission
         for ($i = 0; $i -lt 5; $i++) {
             Start-Sleep -Seconds 3
             $status = Invoke-RestMethod -Uri "http://localhost:8000/queue/status/$($join.token)"
@@ -245,9 +229,7 @@ Test-Component -Name "Admission Controller" -Description "Users are being admitt
     }
 }
 
-# =============================================================================
-# PHASE 4: End-to-End Purchase Flow
-# =============================================================================
+#phase 4: end-to-end purchase flow
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 4: End-to-End Purchase Flow" -ForegroundColor Cyan
@@ -260,11 +242,11 @@ Test-Component -Name "Complete Purchase" -Description "Full flow from queue to o
     try {
         $userId = "test-e2e-$(Get-Random)"
         
-        #Join queue
+        #join queue
         $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$Product"
         Write-Host "    Joined queue: $($join.token)" -ForegroundColor Gray
         
-        #Wait for admission
+        #wait for admission
         $admitted = $false
         for ($i = 0; $i -lt 10; $i++) {
             Start-Sleep -Seconds 3
@@ -282,7 +264,7 @@ Test-Component -Name "Complete Purchase" -Description "Full flow from queue to o
             return $false
         }
         
-        #Attempt purchase(may fail due to simulated payment failure)
+        #attempt purchase(may fail due to simulated payment failure)
         for ($attempt = 1; $attempt -le 3; $attempt++) {
             $purchase = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/purchase?token=$($join.token)"
             
@@ -295,7 +277,7 @@ Test-Component -Name "Complete Purchase" -Description "Full flow from queue to o
                 Write-Host "    Attempt $attempt failed: $($purchase.reason)" -ForegroundColor Yellow
                 
                 if ($purchase.reason -match "Payment failed|insufficient_funds|Payment error") {
-                    # Re-join queue for retry
+                    #re-join queue for retry
                     $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$Product"
                     Start-Sleep -Seconds 10
                 } else {
@@ -330,8 +312,7 @@ Test-Component -Name "Idempotency Protection" -Description "Duplicate orders are
         $purchase1 = $null
         $join = $null
 
-        #Payment is intentionally probabilistic in the demo. Try fresh users
-        #until one payment succeeds; idempotency is checked only after that.
+        #payment is intentionally probabilistic in the demo. try fresh users until one payment succeeds; idempotency is checked only after that.
         for ($attempt = 1; $attempt -le 8 -and -not $purchase1.success; $attempt++) {
             $userId = "test-idempotent-$attempt-$(Get-Random)"
             $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$Product"
@@ -353,7 +334,7 @@ Test-Component -Name "Idempotency Protection" -Description "Duplicate orders are
         }
 
         if ($purchase1 -and $purchase1.success) {
-            #A second request with the same token must not create another order.
+            #a second request with the same token must not create another order.
             $purchase2 = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/purchase?token=$($join.token)"
             $sameOrder = $purchase2.success -and $purchase2.order.id -eq $purchase1.order.id
             $explicitlyRejected = $purchase2.reason -match "already|completed"
@@ -372,9 +353,7 @@ Test-Component -Name "Idempotency Protection" -Description "Duplicate orders are
     }
 }
 
-# =============================================================================
-# PHASE 5: Fault Tolerance and Recovery
-# =============================================================================
+#phse 5: fault tolerance and recovery
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 5: Fault Tolerance and Recovery" -ForegroundColor Cyan
@@ -407,8 +386,7 @@ Test-Component -Name "Payment Retry Logic" -Description "System handles payment 
         
         Write-Host "    Attempts: $attempts, Successes: $successes, Payment Failures: $paymentFailures" -ForegroundColor Gray
         
-        #A random sample is not required to contain both outcomes. Verify every
-        #attempt produced either a success or a payment failure.
+        #a random sample is not required to contain both outcomes. verify every attempt produced either a success or a payment failure.
         return $attempts -eq 10 -and ($successes + $paymentFailures) -eq $attempts
     } finally {
         Stop-Job -Job $portForward -ErrorAction SilentlyContinue
@@ -425,15 +403,13 @@ Test-Component -Name "Pod Recovery" -Description "System recovers when pods are 
     Write-Host "    Waiting 30 seconds for recovery..." -ForegroundColor Gray
     Start-Sleep -Seconds 30
     
-    #Check if new pod is running
+    #check if new pod is running
     $pods = kubectl get pods -n dffs -l app=gateway -o json | ConvertFrom-Json
     $runningPods = ($pods.items | Where-Object { $_.status.phase -eq "Running" }).Count
     
     Write-Host "    Gateway pods running: $runningPods" -ForegroundColor Gray
     
-    #Verify service still works
-    #Use a dedicated port so an operator's separate Kubernetes port-forward
-    #cannot intercept this recovery check.
+    #verify service still works, use a dedicated port so an operator's separate Kubernetes port-forward, cannot intercept this recovery check.
     $recoveryPort = 18000
     $portForward = Start-Job -ScriptBlock {
         param($port)
@@ -462,32 +438,31 @@ Test-Component -Name "Redis Persistence" -Description "Queue state survives Redi
     Start-Sleep -Seconds 3
     
     try {
-        #Create a token
+        #create a token
         $userId = "test-persist-$(Get-Random)"
         $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$Product"
         $originalToken = $join.token
         
         Write-Host "    Created token: $originalToken" -ForegroundColor Gray
         
-        #Query it back
+        #query it back
         $status1 = Invoke-RestMethod -Uri "http://localhost:8000/queue/status/$originalToken"
         
         Write-Host "    Initial status: $($status1.status)" -ForegroundColor Gray
         
-        #Restart gateway pods to force new Redis connections
+        #restart gateway pods to force new Redis connections
         kubectl delete pod -l app=gateway -n dffs --force --grace-period=0 2>&1 | Out-Null
         
         Write-Host "    Restarted gateway pods" -ForegroundColor Gray
         Start-Sleep -Seconds 30
         
-        #Recreate the port-forward because the original forward points at
-        #deleted gateway pods.
+        #recreate the port-forward because the original forward points at deleted gateway pods.
         Stop-Job -Job $portForward -ErrorAction SilentlyContinue
         Remove-Job -Job $portForward -ErrorAction SilentlyContinue
         $portForward = Start-Job -ScriptBlock { kubectl port-forward -n dffs svc/gateway 8000:8000 2>&1 | Out-Null }
         Start-Sleep -Seconds 5
 
-        #Query token again
+        #query token again
         $status2 = Invoke-RestMethod -Uri "http://localhost:8000/queue/status/$originalToken"
         
         Write-Host "    Status after restart: $($status2.status)" -ForegroundColor Gray
@@ -531,9 +506,7 @@ Test-Component -Name "Inventory Reservation Lifecycle" -Description "Reservation
     }
 }
 
-# =============================================================================
-# PHASE 6: Concurrent Load Test
-# =============================================================================
+#phase 6: concurrent load test
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 6: Concurrent Load Test" -ForegroundColor Cyan
@@ -549,16 +522,16 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
         $jobs = @()
         $results = @()
         
-        #Create concurrent users
+        #create concurrent users
         for ($i = 1; $i -le $ConcurrentUsers; $i++) {
             $job = Start-Job -ScriptBlock {
                 param($userId, $product)
                 
                 try {
-                    #Join queue
+                    #join queue
                     $join = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/queue/join?user_id=$userId&product_id=$product" -TimeoutSec 10
                     
-                    #Wait for admission
+                    #wait for admission
                     $admitted = $false
                     for ($attempt = 0; $attempt -lt 20; $attempt++) {
                         Start-Sleep -Seconds 3
@@ -574,7 +547,7 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
                         return @{Success=$false; Reason="Not admitted"}
                     }
                     
-                    #Attempt purchase
+                    #attempt purchase
                     $purchase = Invoke-RestMethod -Method POST -Uri "http://localhost:8000/purchase?token=$($join.token)" -TimeoutSec 10
                     
                     return @{
@@ -593,7 +566,7 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
         
         Write-Host "    Waiting for all $ConcurrentUsers users to complete..." -ForegroundColor Gray
         
-        #Wait for all jobs(max 120 seconds)
+        #wait for all jobs(max 120 seconds)
         $timeout = 120
         $elapsed = 0
         while ($elapsed -lt $timeout) {
@@ -608,7 +581,7 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
             $elapsed += 5
         }
         
-        #Collect results
+        #collect results
         foreach ($job in $jobs) {
             $result = Receive-Job -Job $job
             $results += $result
@@ -626,7 +599,7 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
         Write-Host "      Failed (payment): $paymentFailed" -ForegroundColor Yellow
         Write-Host "      Other failures: $($failed - $paymentFailed)" -ForegroundColor Red
         
-        #Success if at least 30% got through, accounting for the 20% test rate.
+        #success if at least 30% got through, accounting for the 20% test rate.
         return $successful -gt ($ConcurrentUsers * 0.3)
     } finally {
         Stop-Job -Job $portForward -ErrorAction SilentlyContinue
@@ -634,9 +607,7 @@ Test-Component -Name "Concurrent Users" -Description "System handles $Concurrent
     }
 }
 
-# =============================================================================
-# PHASE 7: Leader Election and High Availability
-# =============================================================================
+#phase 7: leader election and high availability
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 7: Leader Election and High Availability" -ForegroundColor Cyan
@@ -660,7 +631,7 @@ Test-Component -Name "Leader Failover" -Description "New leader is elected when 
 
     Write-Host "    Original leader: $originalLeader" -ForegroundColor Gray
     
-    #Find and kill the leader pod
+    #find and kill the leader pod
     $pods = kubectl get pods -n dffs -l app=admission -o json | ConvertFrom-Json
     $leaderPod = $pods.items | Where-Object { $_.metadata.name -eq $originalLeader }
     
@@ -680,9 +651,7 @@ Test-Component -Name "Leader Failover" -Description "New leader is elected when 
     return $false
 }
 
-# =============================================================================
-# PHASE 8: Data Integrity and Consistency
-# =============================================================================
+#phase 8: data integrity and consistency
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "PHASE 8: Data Integrity and Consistency" -ForegroundColor Cyan
@@ -732,9 +701,7 @@ Test-Component -Name "Inventory Consistency" -Description "Stock levels are trac
     }
 }
 
-# =============================================================================
-# Final Report
-# =============================================================================
+#final report
 
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "TEST SUMMARY" -ForegroundColor Cyan
@@ -757,7 +724,7 @@ if ($TestResults.Failed -gt 0) {
     }
 }
 
-#System snapshot
+#system snapshot
 Write-Host "`n" + "="*70 -ForegroundColor Cyan
 Write-Host "SYSTEM SNAPSHOT" -ForegroundColor Cyan
 Write-Host "="*70 -ForegroundColor Cyan
