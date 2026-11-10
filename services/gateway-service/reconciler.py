@@ -21,17 +21,13 @@ async def release_expired_pending(client, http_client, token, token_data):
     if time.time() - pending_since < PENDING_TIMEOUT_SECONDS:
         return False
 
-    reservation_id = token_data.get("reservation_id")
-    if reservation_id:
-        release_resp = await http_client.post(
-            f"{INVENTORY_URL}/release/{reservation_id}"
-        )
-        release_resp.raise_for_status()
     await client.hset(f"token:{token}", mapping={
-        "status": "admitted",
-        "pending_since": "",
+        "status": "manual_review",
     })
-    print(f"Payment status unavailable for {token}; reservation released")
+    print(
+        f"Payment status unavailable for {token}; "
+        "reservation retained for manual review"
+    )
     return True
 
 async def reconcile_pending_transactions():
@@ -49,7 +45,12 @@ async def reconcile_pending_transactions():
                 token_data = await client.hgetall(key)
                 status = token_data.get("status")
                 
-                if status in {"pending_verification", "manual_review"}:
+                if status in {
+                    "processing",
+                    "pending_verification",
+                    "manual_review",
+                    "completed",
+                }:
                     token = key.split(":", 1)[1]
                     user_id = token_data.get("user_id")
                     product_id = token_data.get("product_id")
@@ -59,13 +60,54 @@ async def reconcile_pending_transactions():
                     #check payment status
                     async with httpx.AsyncClient(timeout=5.0) as http_client:
                         try:
-                            if status == "manual_review":
-                                payment_resp = None
-                                payment_data = {"status": "succeeded"}
-                            else:
+                            reservation_id = token_data.get("reservation_id")
+
+                            if status in {"processing", "completed", "manual_review"}:
+                                if not reservation_id:
+                                    print(
+                                        f"Cannot reconcile {token}: "
+                                        "reservation ID is missing"
+                                    )
+                                    continue
+
+                                existing_order = await http_client.get(
+                                    f"{CHECKOUT_URL}/order/by-token/{token}"
+                                )
+                                if existing_order.status_code == 200:
+                                    commit_resp = await http_client.post(
+                                        f"{INVENTORY_URL}/commit/{reservation_id}"
+                                    )
+                                    commit_resp.raise_for_status()
+                                    await client.hset(
+                                        f"token:{token}",
+                                        "status",
+                                        "completed",
+                                    )
+                                    await client.delete(
+                                        f"active_token:{user_id}:{product_id}"
+                                    )
+                                    reconciled_count += 1
+                                    print(
+                                        f"Committed existing order for {token}"
+                                    )
+                                    continue
+
                                 payment_resp = await http_client.get(
                                     f"{PAYMENT_URL}/status/{token}"
                                 )
+                                if payment_resp.status_code == 404:
+                                    await client.hset(
+                                        f"token:{token}",
+                                        mapping={
+                                            "status": "pending_verification",
+                                            "pending_since": str(time.time()),
+                                        },
+                                    )
+                                    continue
+
+                            payment_resp = await http_client.get(
+                                f"{PAYMENT_URL}/status/{token}"
+                            )
                             
                             if payment_resp is not None and payment_resp.status_code == 404:
                                 if status == "pending_verification":
@@ -83,7 +125,12 @@ async def reconcile_pending_transactions():
                                     print(f"Payment succeeded, completing order for {token}")
                                     
                                     #get reservation_id (should be stored in token data)
-                                    reservation_id = token_data.get("reservation_id")
+                                    if not reservation_id:
+                                        print(
+                                            f"Cannot reconcile {token}: "
+                                            "reservation ID is missing"
+                                        )
+                                        continue
                                     
                                     #create order
                                     order_resp = await http_client.post(
@@ -91,7 +138,7 @@ async def reconcile_pending_transactions():
                                         json={
                                             "user_id": user_id,
                                             "product_id": product_id,
-                                            "reservation_id": reservation_id or "reconciled",
+                                            "reservation_id": reservation_id,
                                             "idempotency_key": token
                                         }
                                     )

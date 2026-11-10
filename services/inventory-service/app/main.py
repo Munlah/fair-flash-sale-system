@@ -108,6 +108,12 @@ def release(reservation_id: str):
 @app.post("/commit/{reservation_id}")
 def commit(reservation_id: str):
     """mark a reservation as consumed by a completed order so the reaper never returns its stock."""
+    if redis_client.get(f"committed:{reservation_id}"):
+        return {"success": True, "already_committed": True}
+
+    if not redis_client.exists(f"reservation:{reservation_id}"):
+        return {"success": False, "reason": "reservation_not_found"}
+
     redis_client.setex(f"committed:{reservation_id}", 7 * 24 * 3600, "1")
     redis_client.delete(f"reservation:{reservation_id}")
     redis_client.delete(f"reservation-product:{reservation_id}")

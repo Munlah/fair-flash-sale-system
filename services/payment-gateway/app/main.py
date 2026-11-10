@@ -5,11 +5,12 @@ import asyncio
 import random
 import time
 import uuid
-from typing import Dict
+import json
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import redis.asyncio as redis
 
 app = FastAPI(title="Payment Gateway Service", version="1.0.0")
 
@@ -21,8 +22,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-#in-memory payment storage (Redis would be used in production)
-payments: Dict[str, dict] = {}
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+redis_client = redis.Redis(
+    host=REDIS_HOST,
+    port=6379,
+    decode_responses=True,
+)
 
 #configuration
 FAILURE_RATE = float(os.getenv("PAYMENT_FAILURE_RATE", "0.3"))  #30% for the demo
@@ -61,9 +66,10 @@ async def health():
 async def charge(request: ChargeRequest):
     """process a payment charge with realistic failure scenarios. idempotent: Same idempotency_key returns the same result"""
     
-    #check if payment already exists(idempotency)
-    existing = payments.get(request.idempotency_key)
-    if existing and existing["status"] == "succeeded":
+    payment_key = f"payment:{request.idempotency_key}"
+    existing_raw = await redis_client.get(payment_key)
+    if existing_raw:
+        existing = json.loads(existing_raw)
         return ChargeResponse(**existing)
     
     #simulate network delay
@@ -87,6 +93,11 @@ async def charge(request: ChargeRequest):
             "user_id": request.user_id,
             "reason": "insufficient_funds"  #or card_declined, etc.
         }
+        await redis_client.set(
+            payment_key,
+            json.dumps(payment_record),
+            ex=7 * 24 * 3600,
+        )
         return ChargeResponse(**payment_record)
     
     #success, record payment
@@ -97,7 +108,11 @@ async def charge(request: ChargeRequest):
         "amount": request.amount,
         "user_id": request.user_id
     }
-    payments[request.idempotency_key] = payment_record
+    await redis_client.set(
+        payment_key,
+        json.dumps(payment_record),
+        ex=7 * 24 * 3600,
+    )
     
     return ChargeResponse(**payment_record)
 
@@ -105,19 +120,26 @@ async def charge(request: ChargeRequest):
 @app.get("/status/{idempotency_key}", response_model=ChargeResponse)
 async def get_payment_status(idempotency_key: str):
     """check payment status by idempotency key, used for verification after timeouts"""
-    if idempotency_key not in payments:
+    payment_raw = await redis_client.get(f"payment:{idempotency_key}")
+    if not payment_raw:
         raise HTTPException(status_code=404, detail="Payment not found")
-    
-    payment = payments[idempotency_key]
+
+    payment = json.loads(payment_raw)
     return ChargeResponse(**payment)
 
 
 @app.get("/stats")
 async def get_stats():
     """get payment statistics"""
-    total = len(payments)
-    succeeded = sum(1 for p in payments.values() if p["status"] == "succeeded")
-    failed = sum(1 for p in payments.values() if p["status"] == "failed")
+    keys = [key async for key in redis_client.scan_iter(match="payment:*")]
+    records = [
+        json.loads(value)
+        for key in keys
+        if (value := await redis_client.get(key))
+    ]
+    total = len(records)
+    succeeded = sum(1 for payment in records if payment["status"] == "succeeded")
+    failed = sum(1 for payment in records if payment["status"] == "failed")
     
     return {
         "total_payments": total,
@@ -130,5 +152,7 @@ async def get_stats():
 @app.delete("/reset")
 async def reset_payments():
     """reset all payments (for testing)"""
-    payments.clear()
+    keys = [key async for key in redis_client.scan_iter(match="payment:*")]
+    if keys:
+        await redis_client.delete(*keys)
     return {"message": "All payments cleared"}

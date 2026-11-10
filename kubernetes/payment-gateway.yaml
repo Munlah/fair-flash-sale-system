@@ -28,6 +28,8 @@ spec:
           value: "0.5"
         - name: PAYMENT_MAX_DELAY
           value: "2.0"
+        - name: REDIS_HOST
+          value: "redis"
         livenessProbe:
           httpGet:
             path: /health

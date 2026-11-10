@@ -28,6 +28,9 @@ kubectl get pods -n dffs
 echo.
 echo Start the Kubernetes gateway and static UI with:
 echo   kubectl port-forward -n dffs svc/gateway 8000:8000
-echo   python -m http.server 5500 --directory frontend
+echo   python -m http.server 5501 --directory frontend
+echo.
+echo Kubernetes gateway: http://localhost:8000
+echo Kubernetes dashboard: http://localhost:5501
 
 endlocal

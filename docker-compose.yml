@@ -70,6 +70,10 @@ services:
       PAYMENT_TIMEOUT_RATE: ${PAYMENT_TIMEOUT_RATE:-0.0}
       PAYMENT_MIN_DELAY: ${PAYMENT_MIN_DELAY:-0.5}
       PAYMENT_MAX_DELAY: ${PAYMENT_MAX_DELAY:-2.0}
+      REDIS_HOST: redis
+    depends_on:
+      redis:
+        condition: service_healthy
     ports:
       - "8003:8000"
     restart: on-failure

@@ -15,7 +15,7 @@ The project is designed to demonstrate two things:
 ## What is in the system?
 
 | Service | Local port | Responsibility |
-| Web UI (Compose/static server) | 5500 | Dashboard and manual demo controls |
+| Web UI (Compose/static server) | 5500 in Compose, 5501 in Kubernetes | Dashboard and manual demo controls |
 | Gateway | 8005 in Compose, 8000 in Kubernetes port-forward | Public API and purchase orchestration |
 | Inventory | 8001 | Atomic reservations and stock |
 | Checkout | 8002 | PostgreSQL order storage and idempotency |
@@ -155,19 +155,32 @@ The frontend is a static folder and is not deployed by the Kubernetes
 manifests. Start it in a second terminal from the repository root:
 
 ```powershell
-python -m http.server 5500 --directory frontend
+python -m http.server 5501 --directory frontend
 ```
 
-Then visit <http://localhost:5500>. The frontend will use the gateway
-port-forward on port 8000. In another terminal, initialize stock:
+Then visit <http://localhost:5501>. The frontend uses the Kubernetes gateway
+port-forward at <http://localhost:8000>. On Windows with the Docker Minikube
+driver, use this port-forward instead of `http://$(minikube ip):30000`; the
+Minikube VM NodePort is not directly routable from every Windows network
+configuration.
+
+In another terminal, initialize stock through the Kubernetes port-forward:
 
 ```powershell
 Invoke-RestMethod -Method POST `
   -Uri "http://localhost:8000/stock/phone/100"
 ```
 
-If a port-forward is already running, stop that terminal process before
-starting another one on the same local port.
+If a port-forward is already running, reuse it. Otherwise start it in a
+separate terminal and leave it running:
+
+```powershell
+kubectl port-forward -n dffs svc/gateway 8000:8000
+```
+
+Port `8000` is the standard local Kubernetes gateway port for this project.
+Port `5501` is the standard local Kubernetes dashboard port because port
+`5500` may already be reserved or occupied by WSL on Windows.
 
 ## Running Locust
 
@@ -269,6 +282,14 @@ It is a smoke and resilience suite, not a full production test. A passing
 run means the main demo paths work in the current environment; it does not
 prove PostgreSQL failover, network partitions, or long-term payment
 reconciliation.
+
+If a payment request times out and the provider has no durable status, the
+system does not assume that the payment failed. The reservation remains held
+and the token is marked `manual_review`, because releasing the item could allow
+another customer to buy it after the original customer was charged. The
+failure-injection runner also refuses to start while `processing`,
+`pending_verification`, or `manual_review` tokens remain, preventing recovery
+work from an earlier run from contaminating the new order count.
 
 ## Failure-injection experiment for the article
 

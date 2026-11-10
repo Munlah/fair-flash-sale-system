@@ -101,6 +101,38 @@ def held_units():
     return int(redis_cli("ZCARD", "reservation_expirations") or 0)
 
 
+def recovery_token_count():
+    statuses = redis_cli(
+        "--scan",
+        "--pattern",
+        "token:*",
+    ).splitlines()
+    recovery_statuses = {"processing", "pending_verification", "manual_review"}
+    count = 0
+    for key in statuses:
+        if redis_cli("HGET", key, "status") in recovery_statuses:
+            count += 1
+    return count
+
+
+def require_clean_recovery_state():
+    count = recovery_token_count()
+    if count:
+        raise RuntimeError(
+            f"{count} recovery tokens remain before the run; "
+            "reconcile or explicitly review them before starting a new test"
+        )
+
+
+def inventory_conservation_holds(
+    stock_start, held_start, stock_end, held_end, new_orders
+):
+    """Verify that available, reserved, and completed units are all accounted for."""
+    initial_units = stock_start + held_start
+    accounted_units = stock_end + held_end + new_orders
+    return initial_units == accounted_units, initial_units, accounted_units
+
+
 def classify(response_or_error, purchase=False):
     if isinstance(response_or_error, Exception):
         return "error"
@@ -198,6 +230,7 @@ class Load:
 
 def run_once(gateway_url, scenario, args, run_number):
     run_id = f"fi{int(time.time())}{run_number}"
+    require_clean_recovery_state()
     stock_response = requests.post(
         f"{gateway_url}/stock/{PRODUCT}/{args.stock}", timeout=5
     )
@@ -260,12 +293,25 @@ def run_once(gateway_url, scenario, args, run_number):
     )
     time.sleep(max(0, args.window - (time.time() - killed_at)))
     load.finish()
-    time.sleep(args.settle)
-
-    stock_end, orders_end = snapshot(gateway_url)
-    held_end = held_units()
-    new_orders = orders_end - orders_start
-    invariant = stock_start + held_start == stock_end + held_end + new_orders
+    convergence_started = time.time()
+    while True:
+        stock_end, orders_end = snapshot(gateway_url)
+        held_end = held_units()
+        new_orders = orders_end - orders_start
+        (
+            invariant,
+            initial_units,
+            accounted_units,
+        ) = inventory_conservation_holds(
+            stock_start,
+            held_start,
+            stock_end,
+            held_end,
+            new_orders,
+        )
+        if invariant or time.time() - convergence_started >= args.settle:
+            break
+        time.sleep(5)
     window_events = [
         event
         for event in load.events
@@ -288,6 +334,10 @@ def run_once(gateway_url, scenario, args, run_number):
         "held_start": held_start,
         "held_end": held_end,
         "invariant_holds": invariant,
+        "initial_units": initial_units,
+        "accounted_units": accounted_units,
+        "accounting_delta": accounted_units - initial_units,
+        "convergence_s": round(time.time() - convergence_started, 1),
         "negative_stock": stock_end < 0,
     }
 
@@ -331,7 +381,12 @@ def main():
     parser.add_argument("--stock", type=int, default=2000)
     parser.add_argument("--warmup", type=float, default=10)
     parser.add_argument("--window", type=float, default=45)
-    parser.add_argument("--settle", type=float, default=20)
+    parser.add_argument(
+        "--settle",
+        type=float,
+        default=180,
+        help="maximum seconds to wait for inventory accounting to converge",
+    )
     parser.add_argument("--recovery-timeout", type=float, default=120)
     parser.add_argument("--output-dir", default="experiments/results")
     args = parser.parse_args()
