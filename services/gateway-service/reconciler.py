@@ -96,13 +96,14 @@ async def reconcile_pending_transactions():
                                     f"{PAYMENT_URL}/status/{token}"
                                 )
                                 if payment_resp.status_code == 404:
-                                    await client.hset(
-                                        f"token:{token}",
-                                        mapping={
-                                            "status": "pending_verification",
-                                            "pending_since": str(time.time()),
-                                        },
-                                    )
+                                    if status == "processing":
+                                        await client.hset(
+                                            f"token:{token}",
+                                            mapping={
+                                                "status": "pending_verification",
+                                                "pending_since": str(time.time()),
+                                            },
+                                        )
                                     continue
 
                             payment_resp = await http_client.get(

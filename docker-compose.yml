@@ -118,6 +118,28 @@ services:
     ports:
       - "8005:8000"
 
+  payment-reconciler:
+    build:
+      context: ./services/gateway-service
+    container_name: dffs-payment-reconciler
+    command: ["python", "-c", "import asyncio; from reconciler import run_reconciler; asyncio.run(run_reconciler())"]
+    environment:
+      REDIS_HOST: redis
+      PAYMENT_URL: http://payment-gateway:8000
+      CHECKOUT_URL: http://checkout-service:8000
+      INVENTORY_URL: http://inventory-service:8000
+      PENDING_TIMEOUT_SECONDS: ${PENDING_TIMEOUT_SECONDS:-240}
+    depends_on:
+      redis:
+        condition: service_healthy
+      inventory-service:
+        condition: service_started
+      checkout-service:
+        condition: service_started
+      payment-gateway:
+        condition: service_started
+    restart: on-failure
+
   web-ui:
     image: nginx:alpine
     container_name: dffs-web-ui

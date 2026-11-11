@@ -291,6 +291,12 @@ failure-injection runner also refuses to start while `processing`,
 `pending_verification`, or `manual_review` tokens remain, preventing recovery
 work from an earlier run from contaminating the new order count.
 
+Docker Compose runs `payment-reconciler` continuously and checks
+`pending_verification` tokens every 30 seconds. The safe default moves an
+unknown payment to `manual_review` after 240 seconds. For a shorter local
+demo, set `PENDING_TIMEOUT_SECONDS=30` before starting Compose; this changes
+only the demo timeout, not the payment-safety decision.
+
 ## Failure-injection experiment for the article
 
 The failure-injection experiment measures recovery time, client-visible system
