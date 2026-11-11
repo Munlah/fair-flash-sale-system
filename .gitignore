@@ -1,4 +1,4 @@
-# Python
+#python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -10,44 +10,44 @@ ENV/
 .venv
 *.egg-info/
 
-# IDE
+#IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+#OS
 .DS_Store
 Thumbs.db
 
-# Logs
+#logs
 *.log
 
-# Database volumes (don't commit large data)
+#database volumes (don't commit large data)
 postgres-data/
 
-# Build artifacts
+#build artifacts
 dist/
 build/
 
-# Redundant/debug files
+#redundant/debug files
 *_debug.py
 curl.exe
 curl
 
-# Backup files
+#backup files
 *.backup
 *.bak
 
-# Screenshots (optional - remove if you want to include them)
-# *.png
-# *.jpg
-# *.jpeg
+#screenshots (optional - remove if you want to include them)
+#*.png
+#*.jpg
+#*.jpeg
 
-# Experiment output
+#experiment output
 experiments/results/
 
-# Environment variables (IMPORTANT: decide if you want to commit .env)
-# Uncomment the line below if .env contains real secrets
-# .env
+#environment variables (IMPORTANT: decide if you want to commit .env)
+#uncomment the line below if .env contains real secrets
+#.env

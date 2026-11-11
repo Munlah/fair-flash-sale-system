@@ -1,17 +1,12 @@
-"""Latency-group load test for the fair flash-sale gateway.
-
-Run with:
-    locust -f locust/latency_groups.py --host http://localhost:8000
-"""
+"""This script tests how the system handles users on different connection speeds. It uses three user classes that follow the exact same flow, just with varying artificial delays tacked on upfront. It's a clean way to test queue fairness without overcomplicating the setup."""
 
 import random
 import time
-
 from locust import HttpUser, between, task
 
 
 class LatencyGroupUser(HttpUser):
-    """Base flow shared by users with different simulated network delays."""
+    """shared queue -> admission -> purchase flow for each latency group."""
 
     abstract = True
     wait_time = between(0.5, 2)
@@ -19,6 +14,7 @@ class LatencyGroupUser(HttpUser):
     group = "unknown"
 
     def on_start(self):
+        """create a unique demo customer before this simulated user starts."""
         self.user_id = f"{self.group}-{random.randint(100000, 999999)}"
         self.token = None
         self.join_time = None
@@ -26,6 +22,7 @@ class LatencyGroupUser(HttpUser):
 
     @task
     def full_purchase_flow(self):
+        """join the waiting room, wait for admission, and attempt checkout."""
         if self.token:
             return
 

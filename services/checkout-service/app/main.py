@@ -1,16 +1,4 @@
-"""
-Checkout Service - Order management and persistence
-==========================================================================
-Handles:
-- Order creation with idempotency
-- Order retrieval by ID, token, or idempotency key
-- Database connection pooling to prevent exhaustion
-- Automatic table creation on startup
-
-Uses PostgreSQL for durable order storage with UNIQUE constraints
-to prevent duplicate orders even under concurrent requests.
-==========================================================================
-"""
+"""Handles order creation, retrieval, and durable storage in PostgreSQL. It uses connection pooling to handle concurrency spikes, auto-creates tables on boot, and relies on database-level UNIQUE constraints alongside idempotency keys to guarantee no duplicate orders go through—even when flooded with requests."""
 
 import os
 from contextlib import asynccontextmanager
@@ -22,46 +10,46 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-# ==========================================================================
-# Configuration - Read from environment variables
-# ==========================================================================
+#configuration: read from environment variables
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://flash_user:flash_pass@postgres:5432/flash_db"
-)
+#build DATABASE_URL from individual env vars (matches Kubernetes secret)
+POSTGRES_HOST = os.getenv("POSTGRES_HOST", "postgres")
+POSTGRES_USER = os.getenv("POSTGRES_USER", "flash")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "flashpass")
+POSTGRES_DB = os.getenv("POSTGRES_DB", "orders")
+
+DATABASE_URL = f"postgresql://{POSTGRES_USER}:{POSTGRES_PASSWORD}@{POSTGRES_HOST}:5432/{POSTGRES_DB}"
 
 db_pool: Optional[asyncpg.Pool] = None
 
-# ==========================================================================
-# Lifespan - Manage startup and shutdown
-# ==========================================================================
+#lifespan: manage startup and shutdown
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Application lifespan manager
-    - Creates database pool on startup
-    - Creates orders table if it doesn't exist
-    - Closes pool on shutdown
-    """
+    """Handles the app's lifecycle: spins up the database connection pool on boot, makes sure the orders table is created if it's missing, and cleanly closes the pool when the app shuts down."""
     global db_pool
     
     try:
-        # Create connection pool
+        #create connection pool
         db_pool = await asyncpg.create_pool(
             DATABASE_URL,
             min_size=5,
             max_size=20,
             command_timeout=10
         )
-        print(f"✓ Database pool created: {DATABASE_URL}")
+        print(f"Database pool created: {DATABASE_URL}")
         
-        # Create orders table if it doesn't exist
+        #create orders table if it doesn't exist
         async with db_pool.acquire() as conn:
+            await conn.execute("""
+                CREATE SEQUENCE IF NOT EXISTS orders_order_id_seq
+            """)
+
             await conn.execute("""
                 CREATE TABLE IF NOT EXISTS orders (
                     id SERIAL PRIMARY KEY,
+                    order_id VARCHAR(50) UNIQUE NOT NULL
+                        DEFAULT ('ord-' || nextval('orders_order_id_seq')),
                     user_id VARCHAR(255) NOT NULL,
                     product_id VARCHAR(255) NOT NULL,
                     reservation_id VARCHAR(255) NOT NULL,
@@ -70,8 +58,35 @@ async def lifespan(app: FastAPI):
                     created_at TIMESTAMP DEFAULT NOW()
                 )
             """)
+
+            await conn.execute("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS id BIGSERIAL
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ADD COLUMN IF NOT EXISTS order_id VARCHAR(50)
+            """)
+            await conn.execute("""
+                UPDATE orders
+                SET order_id = 'ord-' || id::text
+                WHERE order_id IS NULL
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ALTER COLUMN order_id SET DEFAULT
+                    ('ord-' || nextval('orders_order_id_seq'))
+            """)
+            await conn.execute("""
+                ALTER TABLE orders
+                ALTER COLUMN order_id SET NOT NULL
+            """)
+            await conn.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS orders_id_key
+                ON orders(id)
+            """)
             
-            # Create index for faster lookups
+            #create index for faster lookups
             await conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_orders_idempotency_key 
                 ON orders(idempotency_key)
@@ -82,26 +97,24 @@ async def lifespan(app: FastAPI):
                 ON orders(user_id)
             """)
             
-            print("✓ Orders table ready")
+            print("Orders table ready")
             
     except Exception as e:
-        print(f"✗ Failed to initialize database: {e}")
+        print(f"Failed to initialize database: {e}")
         raise
     
     yield
     
-    # Shutdown: close pool
+    #shutdown: close pool
     if db_pool:
         await db_pool.close()
-        print("✓ Database pool closed")
+        print("Database pool closed")
 
-# ==========================================================================
-# Initialize FastAPI application
-# ==========================================================================
+#initialize FastAPI application
 
 app = FastAPI(title="Checkout Service", version="1.0.0", lifespan=lifespan)
 
-# Enable CORS
+#enable CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -110,37 +123,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ==========================================================================
-# Data Models - Define request/response structures
-# ==========================================================================
-
+#data Models: define request/response structures
 class OrderRequest(BaseModel):
-    """Request body for creating an order"""
+    """request body for creating an order"""
     user_id: str
     product_id: str
     reservation_id: str
-    idempotency_key: str  # Prevents duplicate orders (usually the token)
+    idempotency_key: str  #prevents duplicate orders (usually the token)
 
 class OrderResponse(BaseModel):
-    """Response after creating or retrieving an order"""
+    """response after creating or retrieving an order"""
     id: int
     user_id: str
     product_id: str
     reservation_id: str
     idempotency_key: str
     status: str
-    created_at: str  # Changed to str for JSON serialization
+    created_at: str  #changed to str for JSON serialization
 
-# ==========================================================================
-# Health Check Endpoint
-# ==========================================================================
+#health check endpoint
 
 @app.get("/health")
 async def health():
-    """
-    Health check endpoint
-    Verifies database connection is working
-    """
+    """health check endpoint: verifies database connection is working"""
     try:
         if db_pool:
             async with db_pool.acquire() as conn:
@@ -151,21 +156,11 @@ async def health():
     except Exception as e:
         return {"status": "unhealthy", "service": "checkout", "error": str(e)}
 
-# ==========================================================================
-# Order Creation - Create new order with idempotency
-# ==========================================================================
+#order creation: create new order with idempotency
 
 @app.post("/order", response_model=OrderResponse)
 async def create_order(order: OrderRequest):
-    """
-    Create a new order with idempotency protection
-    
-    The idempotency_key (usually the queue token) ensures that if the same
-    request is sent multiple times, only one order is created.
-    
-    PostgreSQL UNIQUE constraint on idempotency_key prevents duplicates
-    even if multiple requests arrive simultaneously.
-    """
+    """creates a new order while preventing duplicates using the idempotency_key (usually the queue token). even if retries or concurrent requests hit this at the exact same time, Postgres's UNIQUE constraint ensures only a single order gets written."""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")
@@ -173,7 +168,7 @@ async def create_order(order: OrderRequest):
     try:
         async with db_pool.acquire() as conn:
             
-            # Check if order already exists (idempotency)
+            #check if order already exists (idempotency)
             existing = await conn.fetchrow(
                 """
                 SELECT id, user_id, product_id, reservation_id, 
@@ -185,7 +180,7 @@ async def create_order(order: OrderRequest):
             )
             
             if existing:
-                # Order already exists - return it
+                #order already exists: return it
                 return OrderResponse(
                     id=existing['id'],
                     user_id=existing['user_id'],
@@ -196,7 +191,7 @@ async def create_order(order: OrderRequest):
                     created_at=existing['created_at'].isoformat()
                 )
             
-            # Create new order with ON CONFLICT to handle race conditions
+            #create new order with ON CONFLICT to handle race conditions
             result = await conn.fetchrow(
                 """
                 INSERT INTO orders (user_id, product_id, reservation_id, idempotency_key, status, created_at)
@@ -211,7 +206,7 @@ async def create_order(order: OrderRequest):
             )
             
             if result:
-                # Successfully created new order
+                #successfully created new order
                 return OrderResponse(
                     id=result['id'],
                     user_id=result['user_id'],
@@ -222,7 +217,7 @@ async def create_order(order: OrderRequest):
                     created_at=result['created_at'].isoformat()
                 )
             else:
-                # ON CONFLICT triggered - fetch the existing order
+                #ON CONFLICT triggered: fetch the existing order
                 existing = await conn.fetchrow(
                     """
                     SELECT id, user_id, product_id, reservation_id, 
@@ -252,13 +247,11 @@ async def create_order(order: OrderRequest):
         print(f"Error creating order: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# ==========================================================================
-# Order Retrieval - Get order by various keys
-# ==========================================================================
+#order retrieval: get order by various keys
 
 @app.get("/order/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: int):
-    """Get order by database ID"""
+    """get order by database ID"""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")
@@ -296,12 +289,7 @@ async def get_order(order_id: int):
 
 @app.get("/order/by-idempotency/{idempotency_key}", response_model=OrderResponse)
 async def get_order_by_idempotency(idempotency_key: str):
-    """
-    Get order by idempotency key (usually the queue token)
-    
-    This endpoint is used by the gateway to check if an order already exists
-    before attempting to reserve stock (fixes the retry leak bug).
-    """
+    """Get order by idempotency key (usually the queue token),this endpoint is used by the gateway to check if an order already exists before attempting to reserve stock (fixes the retry leak bug)."""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")
@@ -339,14 +327,12 @@ async def get_order_by_idempotency(idempotency_key: str):
 
 @app.get("/order/by-token/{token}", response_model=OrderResponse)
 async def get_order_by_token(token: str):
-    """
-    Get order by queue token (alias for by-idempotency endpoint)
-    """
+    """get order by queue token (alias for by-idempotency endpoint)"""
     return await get_order_by_idempotency(token)
 
 @app.get("/orders/user/{user_id}")
 async def get_user_orders(user_id: str):
-    """Get all orders for a specific user"""
+    """get all orders for a specific user"""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")
@@ -383,16 +369,11 @@ async def get_user_orders(user_id: str):
         print(f"Error retrieving user orders: {e}")
         raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
 
-# ==========================================================================
-# Statistics - Get order counts
-# ==========================================================================
+#statistics: get order counts
 
 @app.get("/orders/count")
 async def get_order_count():
-    """
-    Get total number of orders
-    Used by the UI dashboard to display real order count
-    """
+    """get total number of orders, used by the UI dashboard to display real order count"""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")
@@ -408,7 +389,7 @@ async def get_order_count():
 
 @app.get("/orders/count/product/{product_id}")
 async def get_product_order_count(product_id: str):
-    """Get number of orders for a specific product"""
+    """get number of orders for a specific product"""
     
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database pool not initialized")

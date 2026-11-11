@@ -1,14 +1,7 @@
-# services/inventory-service/app/main.py
-#
-# Inventory & Reservation Service
-# --------------------------------
-# Reserves a unit of stock as a single atomic Redis operation (Lua script),
-# so concurrent requests can never both succeed for the last item. Each
-# reservation is backed by a short-lived key; if checkout never completes,
-# the reservation key expires and the unit must be explicitly released back
-# to the pool via /release (called by the Gateway on a failed checkout).
+#handles atomic stock reservations in Redis using a Lua script—so two concurrent requests can never both sneak in and grab the last item. each reservation sits behind a short-lived TTL key. if the checkout fails or never finishes, the key expires (and the gateway also explicitly calls /release to push the unit right back into the pool).
 
 import os
+import time
 import uuid
 
 import redis
@@ -31,9 +24,9 @@ redis_client = redis.Redis(
     decode_responses=True,
 )
 
-RESERVATION_TIMEOUT = int(os.getenv("RESERVATION_TIMEOUT", "300"))  # seconds
+RESERVATION_TIMEOUT = int(os.getenv("RESERVATION_TIMEOUT", "300"))  #seconds
 
-# Atomic: check stock -> decrement -> record reservation, all in one Redis call.
+#atomic: check stock -> decrement -> record reservation, all in one Redis call.
 RESERVE_SCRIPT = """
 local stock = redis.call('GET', KEYS[1])
 
@@ -46,7 +39,8 @@ if tonumber(stock) <= 0 then
 end
 
 redis.call('DECR', KEYS[1])
-redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[2])
+redis.call('HSET', KEYS[2], 'product_id', ARGV[3], 'created_at', ARGV[4])
+redis.call('EXPIRE', KEYS[2], ARGV[2])
 
 return {'OK', ARGV[1]}
 """
@@ -75,11 +69,20 @@ def reserve(product_id: str):
 
     result = reserve_inventory(
         keys=[f"stock:{product_id}", f"reservation:{reservation_id}"],
-        args=[reservation_id, RESERVATION_TIMEOUT],
+        args=[reservation_id, RESERVATION_TIMEOUT, product_id, str(time.time())],
     )
 
     status = result[0]
     if status == "OK":
+        redis_client.setex(
+            f"reservation-product:{reservation_id}",
+            RESERVATION_TIMEOUT + 3600,
+            product_id,
+        )
+        redis_client.zadd(
+            "reservation_expirations",
+            {reservation_id: time.time() + RESERVATION_TIMEOUT},
+        )
         return {"success": True, "reservation_id": reservation_id}
     return {"success": False, "reason": result[1]}
 
@@ -87,14 +90,35 @@ def reserve(product_id: str):
 @app.post("/release/{reservation_id}")
 def release(reservation_id: str):
     reservation_key = f"reservation:{reservation_id}"
-    product = redis_client.get(reservation_key)
+    reservation = redis_client.hgetall(reservation_key)
+    product = reservation.get("product_id") or redis_client.get(
+        f"reservation-product:{reservation_id}"
+    )
 
-    if product is None:
+    if not product:
         return {"success": False, "reason": "reservation_not_found"}
 
     redis_client.incr(f"stock:{product}")
     redis_client.delete(reservation_key)
+    redis_client.delete(f"reservation-product:{reservation_id}")
+    redis_client.zrem("reservation_expirations", reservation_id)
     return {"success": True, "released_product": product}
+
+
+@app.post("/commit/{reservation_id}")
+def commit(reservation_id: str):
+    """mark a reservation as consumed by a completed order so the reaper never returns its stock."""
+    if redis_client.get(f"committed:{reservation_id}"):
+        return {"success": True, "already_committed": True}
+
+    if not redis_client.exists(f"reservation:{reservation_id}"):
+        return {"success": False, "reason": "reservation_not_found"}
+
+    redis_client.setex(f"committed:{reservation_id}", 7 * 24 * 3600, "1")
+    redis_client.delete(f"reservation:{reservation_id}")
+    redis_client.delete(f"reservation-product:{reservation_id}")
+    redis_client.zrem("reservation_expirations", reservation_id)
+    return {"success": True}
 
 
 @app.get("/stock/{product_id}")

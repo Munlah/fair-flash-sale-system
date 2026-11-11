@@ -7,7 +7,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: gateway-service
+    name: gateway
   minReplicas: 2
   maxReplicas: 10
   metrics:
@@ -27,7 +27,7 @@ spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: checkout-service
+    name: checkout
   minReplicas: 2
   maxReplicas: 8
   metrics:
