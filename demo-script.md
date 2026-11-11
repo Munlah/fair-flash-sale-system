@@ -13,4 +13,4 @@ docker compose logs -f admission-service
 start http://localhost:5500/
 
 # Set stock
-curl -X POST http://localhost:8001/stock/phone/50
+curl.exe -X POST http://localhost:8001/stock/phone/50
